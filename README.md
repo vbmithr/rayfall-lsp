@@ -270,6 +270,23 @@ candidate. It works after moving point into existing code, including
 inside `(at cfg 'ca)` after the quoted key prefix. Company must be enabled.
 Other modes retain their existing settings.
 
+When the existing Rayfall REPL is running and idle, the Emacs helper also
+queries `(.repl.complete "prefix")` for global names and leading-dot builtin
+namespaces. For example, `ta` can offer `table`, `take`, and `tan`; `.repl.`
+can offer the engine's actual registered verbs. These candidates carry a
+`[Rayforce session]` annotation and take precedence over static fallback.
+It waits at most 150 ms (`rayfall-lsp-live-completion-timeout`), skips busy
+sessions, and falls through to Eglot on errors or no results. Disable it with
+`rayfall-lsp-live-completion` set to nil. It uses the already-running REPL;
+the helper replaces the old completion fallback that could start a REPL.
+No project source is loaded or evaluated for a completion request.
+
+This is an Emacs bridge alongside the LSP, not a runtime connection inside
+the standalone server. `.repl.complete` currently lists namespace names, not
+dictionary keys, so ordinary member access such as `bt.` and quoted keys
+continue to use static LSP hints. Runtime value inspection is proposed in
+[Rayforce #945](https://github.com/RayforceDB/rayforce/issues/945).
+
 The server implements standard LSP field completion for dotted receivers
 such as `bt.` and literal quoted keys of builtin `at`. It reuses dictionary,
 namespace, and table shapes already available to hover, preserving candidate

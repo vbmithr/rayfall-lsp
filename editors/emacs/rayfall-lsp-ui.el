@@ -54,6 +54,54 @@ Fall back to a help window when posframe or graphical display is unavailable."
              (message "No static information at point")
            (rayfall-lsp--display-inspection documentation windowp)))))))
 
+(defgroup rayfall-lsp-ui nil
+  "Rayfall language-server editor integration."
+  :group 'tools)
+
+(defcustom rayfall-lsp-live-completion t
+  "Use .repl.complete when an existing Rayfall session is idle.
+This covers global names and builtin namespaces, not dictionary fields."
+  :type 'boolean :group 'rayfall-lsp-ui)
+
+(defcustom rayfall-lsp-live-completion-timeout 0.15
+  "Maximum seconds to wait for live namespace completion."
+  :type 'number :group 'rayfall-lsp-ui)
+
+(defvar rayfall-completion-timeout)
+(defvar rayfall-repl-buffer)
+(defvar rayfall-repl--pending-eval)
+(defvar rayfall-repl--completion-request)
+
+(defun rayfall-lsp-live-completion-at-point ()
+  "Offer actual names from an existing Rayforce session before static hints.
+Do not query dictionary member accesses: .repl.complete does not inspect
+those values.  Do not query quoted data, strings, comments, or a busy REPL."
+  (when (and rayfall-lsp-live-completion
+             (fboundp 'rayfall--repl-live-p)
+             (fboundp 'rayfall--completion-candidates)
+             (rayfall--repl-live-p)
+             (not (nth 8 (syntax-ppss))))
+    (let* ((end (point))
+           (start (save-excursion
+                    (skip-chars-backward "A-Za-z0-9_.?!+*/<=>~-")
+                    (point)))
+           (prefix (buffer-substring-no-properties start end)))
+      (when (and (< start end)
+                 (not (memq (char-before start) '(?' ?:)))
+                 (or (not (string-match-p "\\." prefix))
+                     (string-prefix-p "." prefix))
+                 (with-current-buffer rayfall-repl-buffer
+                   (not (or rayfall-repl--pending-eval
+                            rayfall-repl--completion-request))))
+        (condition-case nil
+            (let* ((rayfall-completion-timeout
+                    rayfall-lsp-live-completion-timeout)
+                   (candidates (rayfall--completion-candidates prefix)))
+              (when candidates
+                (list start end candidates :exclusive 'no
+                      :annotation-function (lambda (_) " [Rayforce session]"))))
+          (error nil))))))
+
 (defun rayfall-lsp-complete ()
   "Show completion candidates without immediately inserting a candidate."
   (interactive)
@@ -90,6 +138,12 @@ Fall back to a help window when posframe or graphical display is unavailable."
     ;; Turning off the timer avoids requests, rather than hiding their output.
     (eldoc-mode -1)
     (setq-local company-idle-delay nil)
+    ;; Replace the legacy fallback, which can start a REPL implicitly.
+    (setq-local completion-at-point-functions
+                (cons #'rayfall-lsp-live-completion-at-point
+                      (remq #'rayfall-lsp-live-completion-at-point
+                            (remq #'rayfall-completion-at-point
+                                  completion-at-point-functions))))
     (add-hook 'post-self-insert-hook #'rayfall-lsp-complete-after-dot nil t)
     (local-set-key (kbd "M-TAB") #'rayfall-lsp-complete)
     (local-set-key (kbd "C-c C-d") #'rayfall-lsp-describe-at-point)))

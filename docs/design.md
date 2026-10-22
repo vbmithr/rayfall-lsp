@@ -79,6 +79,15 @@ scope analysis. Existing JSON-RPC and LSP libraries handle protocol messages
 and transport. Tree-sitter supplies error recovery and grammar reuse;
 the native bridge stays small and separate from semantic rules.
 
+The Emacs integration can query `.repl.complete` through an already-running,
+idle Rayfall REPL, showing engine namespace names with a live-session label.
+It falls back to the static server and does not evaluate project buffers.
+The standalone server has no runtime transport yet. Dictionary member and
+table schema inspection, source locations, and signatures are tracked in
+[Rayforce #945](https://github.com/RayforceDB/rayforce/issues/945),
+[#946](https://github.com/RayforceDB/rayforce/issues/946), and
+[#947](https://github.com/RayforceDB/rayforce/issues/947).
+
 The analyzer does not depend on Rayforce internals. Engine support should
 be optional and introduced only where static analysis cannot answer safely.
 
