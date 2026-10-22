@@ -140,8 +140,9 @@ let analyze source =
   let node i = syntax.nodes.(i)
   and text i = Syntax.text syntax i
   and children i = Syntax.named_children syntax i in
-  let remember ?(declaration = false) i name resolution value =
-    pending := (i, name, declaration, resolution, value) :: !pending
+  let remember ?(declaration = false) ?span i name resolution value =
+    let span = Option.value span ~default:(node i).span in
+    pending := (span, name, declaration, resolution, value) :: !pending
   in
   let add kind i name value =
     let b =
@@ -197,8 +198,53 @@ let analyze source =
     else
       match (node i).kind with
       | "identifier" ->
-          let r, v = lookup env (text i) in
-          remember i (text i) r v;
+          let name = text i in
+          let r, v = lookup env name in
+          let parts = String.split_on_char '.' name in
+          let v =
+            match parts with
+            | root :: _ :: _
+              when root <> "" && local env root <> None && local env name = None
+              ->
+                unknown
+            | _ -> v
+          in
+          (match parts with
+          | root :: (_ :: _ as fields)
+            when root <> "" && List.for_all (( <> ) "") fields ->
+              let start = (node i).span.start_byte in
+              let rr, rv = lookup env root in
+              remember
+                ~span:
+                  {
+                    Source.start_byte = start;
+                    end_byte = start + String.length root;
+                  }
+                i root rr rv;
+              ignore
+                (List.fold_left
+                   (fun (prefix, offset) field ->
+                     let prefix = prefix ^ "." ^ field in
+                     let offset = offset + 1 in
+                     let fr, fv =
+                       if local env root <> None && local env prefix = None then
+                         ( `Known
+                             (Runtime_dependent
+                                "member lookup depends on the lexical value"),
+                           unknown )
+                       else lookup env prefix
+                     in
+                     remember
+                       ~span:
+                         {
+                           Source.start_byte = start + offset;
+                           end_byte = start + offset + String.length field;
+                         }
+                       i prefix fr fv;
+                     (prefix, offset + String.length field))
+                   (root, String.length root)
+                   fields)
+          | _ -> remember i name r v);
           (env, v)
       | "source_file" -> sequence depth env (children i)
       | "dictionary" | "vector" | "quoted_symbol" | "string" | "comment" ->
@@ -342,7 +388,7 @@ let analyze source =
   let bindings = List.rev !bindings in
   let occurrences =
     List.rev_map
-      (fun (i, name, declaration, r, v) ->
+      (fun (span, name, declaration, r, v) ->
         let resolution =
           match r with
           | `Known r -> r
@@ -361,7 +407,7 @@ let analyze source =
         in
         {
           name;
-          span = (node i).span;
+          span;
           declaration;
           resolution;
           origins = v.origins;

@@ -14,6 +14,9 @@ It analyzes source without executing your program or starting Rayforce.
   runtime-dependent names, and unresolved names.
 - Tracking function values through direct aliases, exposed through the
   experimental `rayfall/followValue` request.
+- Dotted-name navigation: on `bt` in `bt.cash0`, find the namespace binding;
+  on `cash0`, find known assignments to that qualified field. A lexical
+  parameter named `bt` takes precedence over an unrelated global namespace.
 - Syntax diagnostics, incomplete source, and UTF-16 editor positions.
 
 Function bodies can run after globals change. Global references inside them
@@ -40,8 +43,9 @@ are supported. If several paths exist, all remain candidates.
 
 This also handles a strategy loading `strategies/common.rfl` while stored
 inside `strategies/`: the path can resolve from its parent directory.
-Only files reachable through recognized literal loads are included; unrelated
-workspace files and runtime session globals are not searched.
+Only the current document, configured entrypoints, and their recognized
+literal-load dependencies are included; unrelated workspace files and runtime
+session globals are not searched.
 
 Imported assignments are candidate definitions, not a claim about which
 assignment ran last. Go to definition may return several locations, and hover
@@ -57,8 +61,41 @@ allows 128 files, 32 load edges in depth, and 16 MiB of source per request,
 with a 4 MiB limit per file. Only regular files are read. Large dependency
 graphs may return a partial set of candidates, with a hover explanation.
 
-Cross-file function-value origin tracking and exact load-order modeling are
-still future work; this milestone adds binding navigation.
+### Entrypoints and working directory
+
+For programs whose runner loads the kernel and selects a plugin dynamically,
+put `.rayfall-lsp.json` in the project directory:
+
+```json
+{
+  "entrypoints": ["run.rfl"],
+  "workingDirectory": "."
+}
+```
+
+The nearest configuration between the current file and its containing
+workspace root applies. Both fields are optional; paths are relative to the
+configuration file, and absolute paths are also accepted. Configuration is
+read again on each request. Invalid configuration is explained in hover and
+does not disable ordinary literal-load navigation.
+
+`entrypoints` adds the listed runners and their literal dependencies to the
+current document's dependency snapshot. This makes a kernel loaded by
+`run.rfl` visible from a strategy even when the runner chooses that strategy
+through a dynamic path. Up to 16 entrypoints may be listed. Their order does
+not imply execution order; multiple runners contribute alternative candidates.
+
+`workingDirectory` resolves every relative load against that directory,
+replacing the ancestor search. Use it to match the directory from which you
+run Rayforce and eliminate ambiguous path matches. Unsaved entrypoint buffers
+override their disk versions, just like other dependencies.
+
+Configuration never executes code or interprets dynamic paths. Global
+references inside a function still depend on call time, so entrypoint
+assignments remain candidates. Entrypoints establish possible shared context,
+not proof that a dynamically selected strategy or an assignment executed.
+Cross-file function-value origin tracking and exact execution-order modeling
+remain future work.
 
 ## Build and test
 

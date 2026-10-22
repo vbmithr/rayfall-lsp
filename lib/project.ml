@@ -68,12 +68,80 @@ let create ~roots ~documents entry =
     in
     loop [] dir
   in
+  (* Configuration is data only: no commands or project code are executed. *)
+  let entrypoints, working_directory =
+    let config =
+      match path_of_uri (Source.uri (Analysis.source entry)) with
+      | None -> None
+      | Some importer ->
+          List.find_opt Sys.file_exists
+            (List.map
+               (fun dir -> Filename.concat dir ".rayfall-lsp.json")
+               (directories (canonical importer)))
+    in
+    match config with
+    | None -> ([], None)
+    | Some path -> (
+        try
+          if (Unix.stat path).Unix.st_kind <> Unix.S_REG then
+            invalid_arg "configuration is not a regular file";
+          let ch = open_in_bin path in
+          let json =
+            Fun.protect
+              ~finally:(fun () -> close_in_noerr ch)
+              (fun () ->
+                let size = in_channel_length ch in
+                if size > 65536 then invalid_arg "configuration exceeds 64 KiB";
+                Yojson.Safe.from_string (really_input_string ch size))
+          in
+          let fields =
+            match json with
+            | `Assoc fields -> fields
+            | _ -> invalid_arg "configuration must be an object"
+          in
+          List.iter
+            (fun (key, _) ->
+              if not (List.mem key [ "entrypoints"; "workingDirectory" ]) then
+                invalid_arg ("unknown configuration field: " ^ key))
+            fields;
+          let base = Filename.dirname path in
+          let resolve = function
+            | `String s when s <> "" ->
+                canonical
+                  (if Filename.is_relative s then Filename.concat base s else s)
+            | _ -> invalid_arg "configuration paths must be nonempty strings"
+          in
+          let entrypoints =
+            match List.assoc_opt "entrypoints" fields with
+            | None -> []
+            | Some (`List xs) when List.length xs <= 16 ->
+                List.sort_uniq String.compare (List.map resolve xs)
+            | _ ->
+                invalid_arg "entrypoints must be an array of at most 16 paths"
+          in
+          let cwd =
+            Option.map resolve (List.assoc_opt "workingDirectory" fields)
+          in
+          (entrypoints, cwd)
+        with
+        | Sys_error message
+        | Invalid_argument message
+        | Failure message
+        | Yojson.Json_error message ->
+            issue ("Invalid " ^ path ^ ": " ^ message);
+            ([], None)
+        | Unix.Unix_error (error, _, _) ->
+            issue ("Cannot read " ^ path ^ ": " ^ Unix.error_message error);
+            ([], None))
+  in
   let load_paths importer path =
     let paths =
       if Filename.is_relative path then
         List.map
           (fun dir -> canonical (Filename.concat dir path))
-          (directories importer)
+          (match working_directory with
+          | Some dir -> [ dir ]
+          | None -> directories importer)
       else [ canonical path ]
     in
     List.sort_uniq String.compare paths
@@ -114,6 +182,15 @@ let create ~roots ~documents entry =
   let queue = Queue.create () in
   let add depth a = Queue.add (depth, a) queue in
   add 0 entry;
+  List.iter
+    (fun path ->
+      let current =
+        Option.map canonical (path_of_uri (Source.uri (Analysis.source entry)))
+      in
+      if Some path <> current then (
+        scheduled := Paths.add path !scheduled;
+        match read path with None -> () | Some a -> add 0 a))
+    entrypoints;
   while not (Queue.is_empty queue) do
     let depth, a = Queue.take queue in
     let src = Analysis.source a in
@@ -185,8 +262,9 @@ let resolve t analysis (o : Analysis.occurrence) =
     | bs ->
         Analysis.Candidates
           ( bs,
-            "assignments in this document and literal-load dependencies; \
-             runtime load order and working directory are not proven" )
+            "assignments in this document, configured entrypoints, and \
+             literal-load dependencies; runtime execution order is not proven"
+          )
   in
   match o.resolution with
   | Analysis.Candidates (bs, _) -> candidates bs

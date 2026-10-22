@@ -22,6 +22,70 @@ let check_int = Alcotest.(check int)
 
 let tests =
   [
+    ( "dotted access distinguishes namespace and field",
+      fun () ->
+        let s = "(set bt {}) (set bt.cash0 42) (set report (fn [] bt.cash0))" in
+        let a = analyze s in
+        let byte = find s "bt.cash0))" in
+        let root = occurrence a byte and field = occurrence a (byte + 3) in
+        Alcotest.(check string) "namespace" "bt" root.name;
+        Alcotest.(check string) "field" "bt.cash0" field.name;
+        check_int "namespace assignment" (find s "bt {}")
+          (List.hd (Analysis.targets root.resolution)).location.span.start_byte;
+        check_int "field assignment" (find s "bt.cash0 42")
+          (List.hd (Analysis.targets field.resolution)).location.span.start_byte
+    );
+    ( "local dotted root shadows global namespace",
+      fun () ->
+        let s = "(set bt {}) (set bt.cash0 42) (set f (fn [bt] bt.cash0))" in
+        let a = analyze s in
+        let byte = find s "bt.cash0))" in
+        check_int "local namespace parameter"
+          (find s "[bt]" + 1)
+          (target a byte).location.span.start_byte;
+        check_int "field must not resolve to global namespace" 0
+          (List.length (Analysis.targets (occurrence a (byte + 3)).resolution))
+    );
+    ( "backtester nested map captures ctx and a local",
+      fun () ->
+        let s =
+          "(load \"common.rfl\") (set lots (fn [ctx] (let buffer (at ctx \
+           'buffer)) (map (fn [i] (* (at (at ctx 'mark) i) buffer)) (til 3))))"
+        in
+        let a = analyze s in
+        check_int "captured context"
+          (find s "[ctx]" + 1)
+          (target a (find s "ctx 'mark")).location.span.start_byte;
+        check_int "captured local" (find s "buffer (at")
+          (target a (find s " buffer))" + 1)).location.span.start_byte;
+        check_int "nested index"
+          (find s "[i]" + 1)
+          (target a (find s "i) buffer")).location.span.start_byte );
+    ( "nested parameter shadows outer context",
+      fun () ->
+        let s = "(set f (fn [ctx] (map (fn [ctx] (+ ctx 1)) (list ctx))))" in
+        let a = analyze s in
+        check_int "inner context"
+          (find s "(fn [ctx] (+" + 5)
+          (target a (find s "ctx 1")).location.span.start_byte;
+        check_int "outer context"
+          (find s "[ctx]" + 1)
+          (target a (find s "ctx))))")).location.span.start_byte );
+    ( "strategy conditional keeps captured params",
+      fun () ->
+        let s =
+          "(set trend (fn [ctx] (let p (at ctx 'params)) (if (ready ctx) (do \
+           (let syms (at ctx 'syms)) (map (fn [i] (at p 'buffer)) syms)) \
+           ctx)))"
+        in
+        let a = analyze s in
+        check_int "captured params in branch" (find s "p (at")
+          (target a (find s "p 'buffer")).location.span.start_byte;
+        check_int "branch local" (find s "syms (at")
+          (target a (find s " syms))" + 1)).location.span.start_byte;
+        check_int "else context"
+          (find s "[ctx]" + 1)
+          (target a (find s "ctx)))")).location.span.start_byte );
     ( "parameter shadowing",
       fun () ->
         let s = "(set x 1) (set f (fn [x] (+ x 2)))" in

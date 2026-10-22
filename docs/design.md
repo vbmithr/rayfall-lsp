@@ -59,10 +59,12 @@ Every new precise result should have a regression fixture; uncertain cases
 must remain visibly uncertain.
 
 The initial project model now follows literal loads without executing them,
-uses workspace roots, and refreshes dependency snapshots after edits. Extend
-it with explicit runtime load paths and entrypoints, then model execution
-order where it is statically known. The current model returns candidates
-rather than assuming a working directory or final assignment. Add cached
+uses workspace roots, and refreshes dependency snapshots after edits. It also
+supports `.rayfall-lsp.json` entrypoint and working-directory settings:
+configured runners contribute their literal dependencies, and an explicit
+working directory disambiguates paths. Neither setting establishes actual
+execution order. Next, model execution order where it is statically known;
+dynamic paths and call-time global mutation must remain uncertain. Add cached
 snapshots with dependency invalidation if profiling shows repeated parsing
 is costly, preserving the fresh-snapshot behavior covered by tests.
 

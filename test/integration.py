@@ -86,3 +86,41 @@ with tempfile.TemporaryDirectory(prefix="rayfall lsp ") as directory:
     assert replies[4]["result"] == [], replies[4]
     assert "Candidate definitions" in replies[6]["result"]["contents"]["value"]
 print("PASS: cross-file LSP ancestor paths, URI escaping, overlays, invalidation, close, hover")
+
+with tempfile.TemporaryDirectory(prefix="rayfall entrypoint ") as directory:
+    root = Path(directory)
+    (root / "strategies").mkdir()
+    (root / ".rayfall-lsp.json").write_text(json.dumps({"entrypoints": ["run.rfl"], "workingDirectory": "."}))
+    runner = root / "run.rfl"
+    runner.write_text('(load "bt.rfl") (load (strategy_path))')
+    kernel = root / "bt.rfl"
+    kernel.write_text('; é😀\n(set bt_strategy (fn [run] run))\n(set bt {})\n(set bt.cash0 42)')
+    main = root / "strategies" / "trend.rfl"
+    source = '(set trend (fn [ctx] ctx))\n(bt_strategy trend)\n(set report (fn [] bt.cash0))'
+    uri = main.as_uri()
+    position = {"line": 1, "character": 2}
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": root.as_uri()}},
+        notification("initialized", {}),
+        notification("textDocument/didOpen", {"textDocument": {"uri": uri, "version": 1, "languageId": "rayfall", "text": source}}),
+        request(2),
+        notification("textDocument/didOpen", {"textDocument": {"uri": runner.as_uri(), "version": 1, "languageId": "rayfall", "text": '(load (strategy_path))'}}),
+        request(3),
+        notification("textDocument/didClose", {"textDocument": {"uri": runner.as_uri()}}),
+        request(4),
+        {"jsonrpc": "2.0", "id": 6, "method": "textDocument/definition", "params": {"textDocument": {"uri": uri}, "position": {"line": 2, "character": source.splitlines()[2].index("bt.cash0")}}},
+        {"jsonrpc": "2.0", "id": 7, "method": "textDocument/definition", "params": {"textDocument": {"uri": uri}, "position": {"line": 2, "character": source.splitlines()[2].index("bt.cash0") + 3}}},
+        {"jsonrpc": "2.0", "id": 5, "method": "shutdown"},
+        notification("exit", {}),
+    ]
+    replies = run(messages)
+    for identifier in [2, 4]:
+        result = replies[identifier]["result"]
+        assert len(result) == 1 and result[0]["uri"] == kernel.as_uri(), result
+        assert result[0]["range"]["start"] == {"line": 1, "character": 5}, result
+    assert replies[3]["result"] == [], replies[3]
+    for identifier, line in [(6, 2), (7, 3)]:
+        result = replies[identifier]["result"]
+        assert len(result) == 1 and result[0]["uri"] == kernel.as_uri(), result
+        assert result[0]["range"]["start"] == {"line": line, "character": 5}, result
+print("PASS: configured entrypoint LSP navigation, unsaved runner, close, dotted names")

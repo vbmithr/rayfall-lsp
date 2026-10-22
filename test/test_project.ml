@@ -16,9 +16,16 @@ let with_project f =
   let dir = Filename.temp_file "rayfall lsp " "" in
   Sys.remove dir;
   Unix.mkdir dir 0o700;
-  let files = ref [] in
+  let files = ref [] and dirs = ref [] in
+  let rec ensure_dir path =
+    if not (Sys.file_exists path) then (
+      ensure_dir (Filename.dirname path);
+      Unix.mkdir path 0o700;
+      dirs := path :: !dirs)
+  in
   let file name text =
     let p = Filename.concat dir name in
+    ensure_dir (Filename.dirname p);
     files := p :: !files;
     write p text;
     p
@@ -26,6 +33,7 @@ let with_project f =
   Fun.protect
     ~finally:(fun () ->
       List.iter (fun p -> if Sys.file_exists p then Sys.remove p) !files;
+      List.iter Unix.rmdir !dirs;
       Unix.rmdir dir)
     (fun () -> f dir file)
 
@@ -41,6 +49,83 @@ let count = Alcotest.(check int)
 
 let tests =
   [
+    ( "working directory and nearest config select the right file",
+      fun () ->
+        with_project (fun dir file ->
+            ignore (file ".rayfall-lsp.json" "{\"workingDirectory\":\".\"}");
+            let root_helper = file "helper.rfl" "(set x 1)" in
+            let local_helper = file "sub/helper.rfl" "(set x 2)" in
+            let text = "(load \"helper.rfl\") x" in
+            let entry = file "sub/main.rfl" text in
+            let a = analyze entry text in
+            let check expected =
+              let p = Project.create ~roots:[ dir ] ~documents:[] a in
+              let bs = targets p a "x" in
+              count "single configured target" 1 (List.length bs);
+              Alcotest.(check string)
+                "configured source" expected
+                (Lsp.Uri.to_path (Lsp.Uri.of_string (List.hd bs).location.uri))
+            in
+            check root_helper;
+            ignore (file "sub/.rayfall-lsp.json" "{\"workingDirectory\":\".\"}");
+            check local_helper) );
+    ( "entrypoint exposes sibling kernel to a dynamic strategy",
+      fun () ->
+        with_project (fun dir file ->
+            ignore
+              (file ".rayfall-lsp.json"
+                 "{\"entrypoints\":[\"run.rfl\"],\"workingDirectory\":\".\"}");
+            ignore (file "run.rfl" "(load \"bt.rfl\") (load (strategy_path))");
+            let kernel =
+              file "bt.rfl"
+                "(set bt_strategy (fn [name params run prepare] run))"
+            in
+            let text =
+              "(set trend (fn [ctx] ctx)) (bt_strategy 'trend {} trend 0Nl)"
+            in
+            let entry = file "trend.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            let bs = targets p a "bt_strategy" in
+            count "kernel definition" 1 (List.length bs);
+            Alcotest.(check string)
+              "kernel URI" kernel
+              (Lsp.Uri.to_path (Lsp.Uri.of_string (List.hd bs).location.uri));
+            Alcotest.(check bool)
+              "dynamic load stays explicit" true
+              (List.mem "Dynamic load path cannot be followed statically"
+                 (Project.issues p))) );
+    ( "entrypoint overlay and config refresh",
+      fun () ->
+        with_project (fun dir file ->
+            let config =
+              file ".rayfall-lsp.json" "{\"entrypoints\":[\"run.rfl\"]}"
+            in
+            let runner = file "run.rfl" "(set from_runner 1)" in
+            let text = "(set f (fn [] from_runner))" in
+            let entry = file "strategy.rfl" text in
+            let a = analyze entry text in
+            let overlay = analyze runner "; unsaved\n(set from_runner 2)" in
+            let p = Project.create ~roots:[ dir ] ~documents:[ overlay ] a in
+            let b = List.hd (targets p a "from_runner") in
+            let src = Option.get (Project.source p b.location.uri) in
+            count "unsaved runner" 1
+              (Source.position src b.location.span.start_byte).line;
+            write config "{\"entrypoints\":[]}";
+            let p = Project.create ~roots:[ dir ] ~documents:[ overlay ] a in
+            count "removed entrypoint" 0
+              (List.length (targets p a "from_runner"))) );
+    ( "invalid config keeps direct loads usable",
+      fun () ->
+        with_project (fun dir file ->
+            ignore (file ".rayfall-lsp.json" "{\"entrypoint\":42}");
+            ignore (file "helper.rfl" "(set x 1)");
+            let text = "(load \"helper.rfl\") x" in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            count "direct dependency" 1 (List.length (targets p a "x"));
+            count "configuration issue" 1 (List.length (Project.issues p))) );
     ( "transitive loads and cycles",
       fun () ->
         with_project (fun dir file ->
