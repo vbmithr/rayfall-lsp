@@ -102,20 +102,25 @@ those values.  Do not query quoted data, strings, comments, or a busy REPL."
                       :annotation-function (lambda (_) " [Rayforce session]"))))
           (error nil))))))
 
+(defun rayfall-lsp--show-single-candidate ()
+  "Keep the Company menu visible even for one matching candidate."
+  (setq-local company-frontends
+              (mapcar (lambda (frontend)
+                        (pcase frontend
+                          ('company-childframe-unless-just-one-frontend
+                           'company-childframe-frontend)
+                          ('company-pseudo-tooltip-unless-just-one-frontend
+                           'company-pseudo-tooltip-frontend)
+                          (_ frontend)))
+                      company-frontends))
+  )
+
 (defun rayfall-lsp-complete ()
   "Show completion candidates without immediately inserting a candidate."
   (interactive)
   (if (and (require 'company nil t) (bound-and-true-p company-mode))
       (progn
-        (setq-local company-frontends
-                    (mapcar (lambda (frontend)
-                              (pcase frontend
-                                ('company-childframe-unless-just-one-frontend
-                                 'company-childframe-frontend)
-                                ('company-pseudo-tooltip-unless-just-one-frontend
-                                 'company-pseudo-tooltip-frontend)
-                                (_ frontend)))
-                            company-frontends))
+        (rayfall-lsp--show-single-candidate)
         (let ((company-backends '(company-capf)))
           (company-manual-begin)))
     (completion-at-point)))
@@ -133,11 +138,14 @@ those values.  Do not query quoted data, strings, comments, or a busy REPL."
     (rayfall-lsp-complete)))
 
 (defun rayfall-lsp-on-demand-setup ()
-  "Use explicit inspection and dot-triggered completion in Rayfall buffers."
+  "Use explicit inspection and automatic completion in Rayfall buffers."
   (when (and (derived-mode-p 'rayfall-mode) (eglot-managed-p))
     ;; Turning off the timer avoids requests, rather than hiding their output.
     (eldoc-mode -1)
-    (setq-local company-idle-delay nil)
+    (when (require 'company nil t)
+      (setq-local company-idle-delay 0.2)
+      (setq-local company-minimum-prefix-length 2)
+      (rayfall-lsp--show-single-candidate))
     ;; Replace the legacy fallback, which can start a REPL implicitly.
     (setq-local completion-at-point-functions
                 (cons #'rayfall-lsp-live-completion-at-point

@@ -249,14 +249,15 @@ With an existing Emacs `rayfall-mode` and Eglot:
 (add-hook 'rayfall-mode-hook #'eglot-ensure)
 ```
 
-For on-demand inspection and completion, load the optional helper after Eglot:
+For manual inspection and automatic completion, load the optional helper after Eglot:
 
 ```elisp
 (load "~/code/rayfall-lsp/editors/emacs/rayfall-lsp-ui.el")
 ```
 
-It disables automatic ElDoc requests and Company idle completion only in
-Eglot-managed Rayfall buffers. Press `C-c C-d` to request semantic details in
+It disables automatic ElDoc requests in Eglot-managed Rayfall buffers and
+configures Company to offer completion after two characters and a 0.2-second
+typing pause. Press `C-c C-d` to request semantic details in
 a read-only popup using `posframe` and Company tooltip colors. The popup is
 limited to 90 columns and 18 lines and disappears on the next command.
 It is inspection, so selecting text cannot insert it as a completion.
@@ -264,7 +265,9 @@ Use `C-u C-c C-d` for a help window containing the full details. Without
 `posframe` or a graphical display, inspection falls back to that help window.
 Replies received after moving point or editing the buffer are discarded.
 Typing `.` starts a Company field-completion menu automatically. It does not
-insert a candidate until you accept one. Other idle completion remains off.
+insert a candidate until you accept one. Ordinary prefixes such as `(tabl`
+also open the menu after the short typing pause; global name suggestions need
+an already-running Rayfall session (`M-x rayfall-repl`).
 `M-TAB` opens the menu without inserting text, including with one remaining
 candidate. It works after moving point into existing code, including
 inside `(at cfg 'ca)` after the quoted key prefix. Company must be enabled.
@@ -297,8 +300,8 @@ quoted data, unknown receivers,
 and shadowed `at` calls do not borrow fields from unrelated global values.
 Dictionary callback parameter inference and nested dictionary value types
 remain unsupported: a callback parameter such as `ctx` may have no fields.
-Only `.` triggers the Emacs helper automatically; quoted-key completion is
-manual. Other LSP clients can use the advertised `.` and quote triggers.
+The dot trigger opens the menu immediately, while other prefixes use the
+Company idle delay. `M-TAB` can always request completion explicitly. Other LSP clients can use the advertised `.` and quote triggers.
 
 Ensure `rayfall-lsp` is on Emacs's `exec-path`. Use `M-.` for definitions;
 hover information is available through Eglot/ElDoc. Other LSP clients can
