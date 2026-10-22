@@ -41,6 +41,9 @@ type t = {
   occurrences : occurrence list;
   loads : load list;
   exports : (string * schema option) list;
+  functions : (string * location list) list;
+  returns : (location * schema option) list;
+  calls : (location * schema option list) list;
 }
 
 type value_info = {
@@ -153,7 +156,10 @@ let at t byte =
 
 let analyze ?(imports = []) source =
   let syntax = Syntax.parse source in
-  let loads = ref [] in
+  let loads = ref []
+  and returns = ref []
+  and calls = ref []
+  and call_count = ref 0 in
   let bindings = ref []
   and pending = ref []
   and values = Hashtbl.create 32
@@ -225,6 +231,77 @@ let analyze ?(imports = []) source =
     in
     merge_schemas (own @ imported)
   in
+  let global_origins name =
+    let own =
+      List.concat_map
+        (fun b ->
+          if b.kind = Global && b.name = name then (value b).origins else [])
+        !bindings
+    in
+    let external_ =
+      List.concat_map
+        (fun a ->
+          List.concat_map
+            (fun (n, origins) -> if n = name then origins else [])
+            a.functions)
+        imports
+    in
+    List.sort_uniq compare (own @ external_) |> List.filteri (fun i _ -> i < 16)
+  in
+  let argument_hints = Hashtbl.create 32 and return_hints = Hashtbl.create 32 in
+  let hint_count = ref 0 in
+  List.iter
+    (fun a ->
+      List.iter
+        (fun (origin, args) ->
+          List.iteri
+            (fun index schema ->
+              if index < 64 && !hint_count < 16384 then (
+                incr hint_count;
+                let key = (origin, index) in
+                Hashtbl.replace argument_hints key
+                  (schema
+                  :: Option.value
+                       (Hashtbl.find_opt argument_hints key)
+                       ~default:[])))
+            args)
+        a.calls;
+      List.iter
+        (fun (origin, schema) ->
+          Hashtbl.replace return_hints origin
+            (schema
+            :: Option.value (Hashtbl.find_opt return_hints origin) ~default:[]))
+        a.returns)
+    imports;
+  let argument_schema origin index =
+    let prior =
+      Option.value (Hashtbl.find_opt argument_hints (origin, index)) ~default:[]
+    in
+    let current =
+      List.filter_map
+        (fun (target, args) ->
+          if target = origin then List.nth_opt args index else None)
+        !calls
+    in
+    merge_schemas (prior @ current)
+  in
+  let return_schema origins =
+    merge_schemas
+      (List.concat_map
+         (fun origin ->
+           let prior =
+             Option.value (Hashtbl.find_opt return_hints origin) ~default:[]
+           in
+           prior
+           @ List.filter_map
+               (fun (target, schema) ->
+                 if target = origin then Some schema else None)
+               !returns)
+         origins)
+  in
+  let global_value name =
+    { unknown with schema = global_schema name; origins = global_origins name }
+  in
   let rec lookup env name =
     match local env name with
     | Some b -> (`Known (Resolved b), value b)
@@ -239,7 +316,9 @@ let analyze ?(imports = []) source =
         | Some bs ->
             ( `Known
                 (Candidates
-                   (bs, "column origins depend on the source table assignment")),
+                   ( bs,
+                     "column origins depend on source assignments or observed \
+                      call sites; unknown runtime values may differ" )),
               unknown )
         | None
           when Option.fold ~none:false
@@ -251,8 +330,7 @@ let analyze ?(imports = []) source =
                 (Runtime_dependent
                    "query name may be a column; source schema is unknown"),
               unknown ))
-    | None when env.deferred || env.opaque ->
-        (`Global name, { unknown with schema = global_schema name })
+    | None when env.deferred || env.opaque -> (`Global name, global_value name)
     | None -> (
         match Names.find_opt name env.globals with
         | Some b -> (`Known (Resolved b), value b)
@@ -260,7 +338,7 @@ let analyze ?(imports = []) source =
             (`Known (Builtin name), unknown)
         | None ->
             ( `Known (Unresolved ("no binding in this document for " ^ name)),
-              { unknown with schema = global_schema name } ))
+              global_value name ))
   in
   let remember_name ?definition ?name:given_name env i =
     let name = Option.value given_name ~default:(text i) in
@@ -589,24 +667,38 @@ let analyze ?(imports = []) source =
                 head_ref ();
                 match args with
                 | params :: body when (node params).kind = "vector" ->
+                    let origin =
+                      { uri = Source.uri source; span = (node i).span }
+                    in
                     let scope =
                       List.fold_left
-                        (fun scope p ->
+                        (fun scope (index, p) ->
                           if (node p).kind = "identifier" then
-                            let b = add Parameter p (text p) unknown in
+                            let schema =
+                              if index < 64 then argument_schema origin index
+                              else None
+                            in
+                            let b =
+                              add Parameter p (text p) { unknown with schema }
+                            in
                             Names.add b.name b scope
                           else scope)
-                        Names.empty (children params)
+                        Names.empty
+                        (List.mapi
+                           (fun index p -> (index, p))
+                           (children params))
                     in
-                    ignore
-                      (sequence (depth + 1)
-                         {
-                           env with
-                           locals = scope :: env.locals;
-                           deferred = true;
-                           opaque = env.opaque;
-                         }
-                         body);
+                    let _, result =
+                      sequence (depth + 1)
+                        {
+                          env with
+                          locals = scope :: env.locals;
+                          deferred = true;
+                          opaque = env.opaque;
+                        }
+                        body
+                    in
+                    returns := (origin, result.schema) :: !returns;
                     ( env,
                       {
                         origins =
@@ -652,11 +744,27 @@ let analyze ?(imports = []) source =
                     List.iter (fun j -> opaque j "invalid binding form") args;
                     (env, unknown))
               else
-                let env, _ = walk (depth + 1) env head in
-                let env, _ = sequence (depth + 1) env args in
+                let env, fn = walk (depth + 1) env head in
+                let env, actuals =
+                  List.fold_left
+                    (fun (env, actuals) arg ->
+                      let env, value = walk (depth + 1) env arg in
+                      (env, value.schema :: actuals))
+                    (env, []) args
+                in
+                let actuals =
+                  List.rev actuals |> List.filteri (fun index _ -> index < 64)
+                in
+                List.iter
+                  (fun origin ->
+                    if !call_count < 4096 then (
+                      incr call_count;
+                      calls := (origin, actuals) :: !calls))
+                  fn.origins;
+                let schema = return_schema fn.origins in
                 let known_builtin = special && List.mem name builtin_names in
-                ({ env with opaque = env.opaque || not known_builtin }, unknown)
-          )
+                ( { env with opaque = env.opaque || not known_builtin },
+                  { unknown with schema } ))
       | _ -> (env, unknown)
   and query depth env verb args =
     match args with
@@ -857,4 +965,22 @@ let analyze ?(imports = []) source =
         if b.kind = Global then Some (b.name, (value b).schema) else None)
       bindings
   in
-  { source; syntax; bindings; occurrences; loads = List.rev !loads; exports }
+  let functions =
+    List.filter_map
+      (fun b ->
+        if b.kind = Global && (value b).origins <> [] then
+          Some (b.name, (value b).origins)
+        else None)
+      bindings
+  in
+  {
+    source;
+    syntax;
+    bindings;
+    occurrences;
+    loads = List.rev !loads;
+    exports;
+    functions;
+    returns = List.rev !returns;
+    calls = List.rev !calls;
+  }

@@ -238,3 +238,33 @@ with tempfile.TemporaryDirectory(prefix="rayfall references ") as directory:
     assert replies[6]["result"] == [], replies[6]
     assert replies[8]["result"] == [{"uri": uri, "range": {"start": {"line": 6, "character": source.splitlines()[6].index("amount")}, "end": {"line": 6, "character": source.splitlines()[6].index("amount") + len("amount")}}}], replies[8]
 print("PASS: references distinguish shadowing, declarations, aliases, ambiguity, unsaved edits")
+
+with tempfile.TemporaryDirectory(prefix="rayfall argument schemas ") as directory:
+    root = Path(directory)
+    helper = root / "helpers.rfl"
+    runner = root / "run.rfl"
+    (root / ".rayfall-lsp.json").write_text(json.dumps({"entrypoints": ["run.rfl"], "workingDirectory": "."}))
+    source = '(set make (fn [] (table [sym qty] (list [X] [1]))))\n(set consume (fn [a] (select {from: a result: qty})))'
+    helper.write_text(source)
+    runner.write_text('(load "helpers.rfl")\n(set t (make))\n(consume t)')
+    uri = helper.as_uri()
+    position = {"line": 1, "character": source.splitlines()[1].index("qty")}
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": root.as_uri()}},
+        notification("initialized", {}),
+        notification("textDocument/didOpen", {"textDocument": {"uri": uri, "version": 1, "languageId": "rayfall", "text": source}}),
+        request(2), request(3, "textDocument/hover"),
+        notification("textDocument/didOpen", {"textDocument": {"uri": runner.as_uri(), "version": 1, "languageId": "rayfall", "text": '(load "helpers.rfl") (consume (table [sym size] (list [X] [1])))'}}),
+        request(4),
+        notification("textDocument/didClose", {"textDocument": {"uri": runner.as_uri()}}),
+        request(5),
+        {"jsonrpc": "2.0", "id": 6, "method": "shutdown"}, notification("exit", {}),
+    ]
+    replies = run(messages)
+    for identifier in [2, 5]:
+        result = replies[identifier]["result"]
+        assert len(result) == 1 and result[0]["uri"] == uri, result
+        assert result[0]["range"]["start"] == {"line": 0, "character": source.splitlines()[0].index("qty]")}, result
+    assert replies[4]["result"] == [], replies[4]
+    assert "observed call sites" in replies[3]["result"]["contents"]["value"], replies[3]
+print("PASS: return-to-argument schema hints, unknown callers, unsaved caller invalidation")

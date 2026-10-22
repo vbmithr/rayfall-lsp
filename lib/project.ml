@@ -239,7 +239,13 @@ let create ~roots ~documents entry =
                       paths)
               (Analysis.loads a)))
   done;
-  let analyses = List.rev !analyses in
+  let initial = List.rev !analyses in
+  (* Two bounded project passes propagate return schemas into observed call
+     arguments, then the current document consumes those argument hints. *)
+  let summarize imports =
+    List.map (fun a -> Analysis.analyze ~imports (Analysis.source a)) imports
+  in
+  let analyses = summarize (summarize initial) in
   let entry = Analysis.analyze ~imports:analyses (Analysis.source entry) in
   { entry; analyses; sources; issues = List.rev !problems }
 

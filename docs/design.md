@@ -97,8 +97,13 @@ API; standard LSP exposes definite matches and rejects ambiguous targets.
 This is not an exhaustive workspace index and is not sufficient for rename.
 
 Next, extend reference coverage and add completion using those identities.
-Inferring table schemas for function parameters is also still missing: a
-query over an unannotated parameter cannot trace its columns back to callers.
+Bounded argument/return summaries now trace known table schemas through
+observed calls, including the backtester runner and reporting helpers.
+Two project-wide summary passes and one current-document pass exchange
+these hints without claiming a whole-program fixed point. Function-origin
+locations keep calls through aliases separate from later reassignments.
+Inferred column origins stay candidates: unknown callers, higher-order calls,
+deep chains and runtime mutation may escape this bounded analysis.
 Rename should wait until incomplete and ambiguous reference sets can be
 reported and unsafe edits refused.
 

@@ -49,6 +49,82 @@ let count = Alcotest.(check int)
 
 let tests =
   [
+    ( "function returns propagate table arguments across files",
+      fun () ->
+        with_project (fun dir file ->
+            ignore
+              (file ".rayfall-lsp.json"
+                 "{\"entrypoints\":[\"run.rfl\"],\"workingDirectory\":\".\"}");
+            let text =
+              "(set make (fn [] (table [sym qty] (list [X] [1])))) (set \
+               consume (fn [a] (select {from: a result: qty})))"
+            in
+            let helper = file "helpers.rfl" text in
+            ignore
+              (file "run.rfl"
+                 "(load \"helpers.rfl\") (set t (make)) (consume t)");
+            let p =
+              Project.create ~roots:[ dir ] ~documents:[] (analyze helper text)
+            in
+            let a = Project.analysis p in
+            match Project.resolve p a (reference a "qty") with
+            | Analysis.Candidates ([ b ], _) ->
+                Alcotest.(check bool) "origin is header" true (b.kind = Column);
+                Alcotest.(check string)
+                  "source file"
+                  (Source.uri (Analysis.source a))
+                  b.location.uri
+            | _ ->
+                Alcotest.fail
+                  "observed argument must supply an uncertain column origin") );
+    ( "conflicting table arguments retain both column origins",
+      fun () ->
+        with_project (fun dir file ->
+            let text =
+              "(set f (fn [t] (select {from: t value: x}))) (f (table [x] \
+               (list [1]))) (f (table [x] (list [2])))"
+            in
+            let entry = file "main.rfl" text in
+            let p =
+              Project.create ~roots:[ dir ] ~documents:[] (analyze entry text)
+            in
+            let a = Project.analysis p in
+            match Project.resolve p a (reference a "x") with
+            | Analysis.Candidates (bs, _) ->
+                count "two argument origins" 2 (List.length bs)
+            | _ ->
+                Alcotest.fail
+                  "argument schemas must not become a guessed unique binding")
+    );
+    ( "unknown argument and unknown callers never establish a precise schema",
+      fun () ->
+        with_project (fun dir file ->
+            let text =
+              "(set f (fn [t] (select {from: t value: x}))) (f unknown)"
+            in
+            let entry = file "main.rfl" text in
+            let p =
+              Project.create ~roots:[ dir ] ~documents:[] (analyze entry text)
+            in
+            count "no invented origin" 0
+              (List.length (targets p (Project.analysis p) "x"))) );
+    ( "function alias argument hints preserve the captured function",
+      fun () ->
+        with_project (fun dir file ->
+            let text =
+              "(set f (fn [t] (select {from: t value: x}))) (set handler f) \
+               (set f (fn [t] (select {from: t value: y}))) (handler (table \
+               [x] (list [1])))"
+            in
+            let entry = file "main.rfl" text in
+            let p =
+              Project.create ~roots:[ dir ] ~documents:[] (analyze entry text)
+            in
+            let a = Project.analysis p in
+            count "captured function sees table" 1
+              (List.length (targets p a "x"));
+            count "replacement does not inherit old alias call" 0
+              (List.length (targets p a "y"))) );
     ( "references distinguish lexical shadowing and declarations",
       fun () ->
         with_project (fun dir file ->

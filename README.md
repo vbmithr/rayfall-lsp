@@ -98,9 +98,25 @@ Global table assignments, including alternative assignments, contribute
 candidate column origins rather than guaranteed runtime schemas. Unsaved
 dependency edits refresh those origins. This is bounded structural inference,
 not execution or a complete type checker: arbitrary cross-file computations,
-other join kinds, dynamic constructors, schemas of function parameters,
+other join kinds, dynamic constructors, unobserved or higher-order call schemas,
 grouped update results, sorting/control clauses,
 and quoted in-place update/delete targets remain unsupported.
+
+Function parameters can receive schema hints from visible call sites, including
+calls across loaded files. Function return summaries let a table produced by
+one helper supply a later helper's argument schema. For example, if a runner
+passes `(make_table)` into a reporting helper, column navigation in that helper
+can trace back to `make_table`'s known outputs. Simple aliases keep the origin
+of the function they captured even after its original name is reassigned.
+
+These are candidate origins, not parameter types or a closed-world guarantee.
+Unknown callers and arguments may differ. Conflicting observed schemas retain
+all known origins. The analysis uses two project-wide summary passes followed
+by a current-document pass, so deep chains, recursion and higher-order calls
+may remain unresolved. Each document records at most 4096 call-target records
+and 64 arguments per record, with up to 16 global function origins per name;
+imported argument hints are capped at 16384 observations per analysis. Nothing
+executes project code. Unsaved caller edits refresh the hints.
 
 Quoted symbols normally remain data. The first argument to the builtin
 `alter` is an exception: `(alter 'bt.qty set i value)` references a mutation
