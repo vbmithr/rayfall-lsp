@@ -36,6 +36,7 @@ let int j = Json.to_int j
 let obj xs = `Assoc xs
 let string s = `String s
 let docs : (string, Analysis.t) Hashtbl.t = Hashtbl.create 16
+let project_cache = Project.Cache.create ()
 let roots = ref []
 let initialized = ref false
 let stopped = ref false
@@ -105,7 +106,7 @@ let document_at params =
       { line = int (member "line" p); character = int (member "character" p) }
   in
   let project =
-    Project.create ~roots:!roots
+    Project.Cache.get project_cache ~roots:!roots
       ~documents:(Hashtbl.fold (fun _ a xs -> a :: xs) docs [])
       analysis
   in

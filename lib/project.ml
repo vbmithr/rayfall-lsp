@@ -1,10 +1,27 @@
 module Paths = Set.Make (String)
 
+let fingerprint path =
+  try
+    let s = Unix.stat path in
+    Some
+      ( Unix.realpath path,
+        s.Unix.st_dev,
+        s.st_ino,
+        s.st_kind,
+        s.st_size,
+        s.st_mtime,
+        s.st_ctime )
+  with Unix.Unix_error _ -> None
+
 type t = {
   entry : Analysis.t;
   analyses : Analysis.t list;
   sources : (string, Source.t) Hashtbl.t;
   issues : string list;
+  watched :
+    (string
+    * (string * int * int * Unix.file_kind * int * float * float) option)
+    list;
 }
 
 let path_of_uri uri =
@@ -34,6 +51,21 @@ let within root path =
   root = "/" || path = root || String.starts_with ~prefix:(root ^ "/") path
 
 let create ~roots ~documents entry =
+  let watched = Hashtbl.create 32 in
+  let watch path =
+    if not (Hashtbl.mem watched path) then
+      Hashtbl.add watched path (fingerprint path)
+  in
+  let canonical path =
+    watch path;
+    let resolved = canonical path in
+    watch resolved;
+    resolved
+  in
+  let exists path =
+    watch path;
+    Sys.file_exists path
+  in
   let roots = List.map canonical roots in
   let overlays = Hashtbl.create 16 in
   List.iter
@@ -75,7 +107,7 @@ let create ~roots ~documents entry =
       match path_of_uri (Source.uri (Analysis.source entry)) with
       | None -> None
       | Some importer ->
-          List.find_opt Sys.file_exists
+          List.find_opt exists
             (List.map
                (fun dir -> Filename.concat dir ".rayfall-lsp.json")
                (directories (canonical importer)))
@@ -146,7 +178,7 @@ let create ~roots ~documents entry =
       else [ canonical path ]
     in
     List.sort_uniq String.compare paths
-    |> List.filter (fun p -> Hashtbl.mem overlays p || Sys.file_exists p)
+    |> List.filter (fun p -> Hashtbl.mem overlays p || exists p)
   in
   let read path =
     match Hashtbl.find_opt overlays path with
@@ -247,7 +279,14 @@ let create ~roots ~documents entry =
   in
   let analyses = summarize (summarize initial) in
   let entry = Analysis.analyze ~imports:analyses (Analysis.source entry) in
-  { entry; analyses; sources; issues = List.rev !problems }
+  {
+    entry;
+    analyses;
+    sources;
+    issues = List.rev !problems;
+    watched =
+      Hashtbl.fold (fun path stamp acc -> (path, stamp) :: acc) watched [];
+  }
 
 let analysis t = t.entry
 let source t uri = Hashtbl.find_opt t.sources uri
@@ -338,3 +377,61 @@ let references t ~include_declaration binding =
     definite = List.sort_uniq compare_location !definite;
     possible = List.sort_uniq compare_location !possible;
   }
+
+type snapshot = t
+
+let build_snapshot = create
+
+module Cache = struct
+  type snapshot = {
+    roots : string list;
+    documents : Analysis.t list;
+    entry : Analysis.t;
+    project : t;
+  }
+
+  type t = snapshot list ref
+
+  let create () = ref []
+
+  let get cache ~roots ~documents entry =
+    let documents =
+      List.sort
+        (fun a b ->
+          String.compare
+            (Source.uri (Analysis.source a))
+            (Source.uri (Analysis.source b)))
+        documents
+    in
+    let same_documents a b =
+      List.length a = List.length b && List.for_all2 ( == ) a b
+    in
+    let valid snapshot =
+      snapshot.entry == entry && snapshot.roots = roots
+      && same_documents snapshot.documents documents
+      && List.for_all
+           (fun (path, stamp) -> fingerprint path = stamp)
+           snapshot.project.watched
+    in
+    match List.find_opt valid !cache with
+    | Some snapshot ->
+        cache := snapshot :: List.filter (fun s -> s != snapshot) !cache;
+        snapshot.project
+    | None ->
+        let project = build_snapshot ~roots ~documents entry in
+        let snapshot = { roots; documents; entry; project } in
+        let others =
+          List.filter
+            (fun s ->
+              Source.uri (Analysis.source s.entry)
+              <> Source.uri (Analysis.source entry))
+            !cache
+        in
+        let rec take n = function
+          | _ when n = 0 -> []
+          | [] -> []
+          | x :: xs -> x :: take (n - 1) xs
+        in
+        cache := snapshot :: take 3 others;
+        project
+end

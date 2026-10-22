@@ -49,6 +49,86 @@ let count = Alcotest.(check int)
 
 let tests =
   [
+    ( "cache reuse and invalidation",
+      fun () ->
+        with_project (fun dir file ->
+            let text = "(load \"helper.rfl\") (set f (fn [] x))" in
+            let path = file "main.rfl" text in
+            let helper = file "helper.rfl" "(set x 1)" in
+            let entry = analyze path text in
+            let cache = Project.Cache.create () in
+            let get documents =
+              Project.Cache.get cache ~roots:[ dir ] ~documents entry
+            in
+            let first = get [] in
+            Alcotest.(check bool) "reuse" true (first == get []);
+            write helper "; moved\n(set x 12345)";
+            let changed = get [] in
+            Alcotest.(check bool) "disk edit" false (first == changed);
+            let overlay = analyze helper "(set other 1)" in
+            let opened = get [ overlay ] in
+            count "overlay hides x" 0 (List.length (targets opened entry "x"));
+            Alcotest.(check bool)
+              "overlay reuse" true
+              (opened == get [ overlay ]);
+            let closed = get [] in
+            count "close restores disk" 1
+              (List.length (targets closed entry "x"));
+            let config =
+              file ".rayfall-lsp.json" "{\"entrypoints\":[\"extra.rfl\"]}"
+            in
+            ignore (file "extra.rfl" "(set x 2)");
+            let configured = get [] in
+            count "new configuration" 2
+              (List.length (targets configured entry "x"));
+            write config "{}";
+            let unconfigured = get [] in
+            count "configuration edit" 1
+              (List.length (targets unconfigured entry "x"));
+            Sys.remove helper;
+            let deleted = get [] in
+            count "dependency deletion" 0
+              (List.length (targets deleted entry "x"));
+            let changed_entry = analyze path (text ^ " ") in
+            let edited =
+              Project.Cache.get cache ~roots:[ dir ] ~documents:[] changed_entry
+            in
+            Alcotest.(check bool) "entry edit" false (configured == edited)) );
+    ( "cache discovers missing loads",
+      fun () ->
+        with_project (fun dir file ->
+            let text = "(load \"later.rfl\") (set f (fn [] x))" in
+            let path = file "main.rfl" text in
+            let entry = analyze path text in
+            let cache = Project.Cache.create () in
+            let get () =
+              Project.Cache.get cache ~roots:[ dir ] ~documents:[] entry
+            in
+            let missing = get () in
+            count "missing" 0 (List.length (targets missing entry "x"));
+            ignore (file "later.rfl" "(set x 1)");
+            let found = get () in
+            count "new load" 1 (List.length (targets found entry "x"));
+            Alcotest.(check bool) "new snapshot" false (missing == found)) );
+    ( "cache detects symlink retargeting",
+      fun () ->
+        with_project (fun dir file ->
+            let text = "(load \"alias.rfl\") (set f (fn [] x))" in
+            let path = file "main.rfl" text in
+            let first = file "first.rfl" "(set x 1)" in
+            let second = file "second.rfl" "(set y 1)" in
+            let alias = file "alias.rfl" "" in
+            Sys.remove alias;
+            Unix.symlink first alias;
+            let entry = analyze path text in
+            let cache = Project.Cache.create () in
+            let get () =
+              Project.Cache.get cache ~roots:[ dir ] ~documents:[] entry
+            in
+            count "first target" 1 (List.length (targets (get ()) entry "x"));
+            Sys.remove alias;
+            Unix.symlink second alias;
+            count "retargeted" 0 (List.length (targets (get ()) entry "x"))) );
     ( "imported namespaces expose candidate fields",
       fun () ->
         with_project (fun dir file ->

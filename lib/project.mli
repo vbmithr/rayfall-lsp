@@ -1,6 +1,6 @@
 type t
-(** A bounded, request-scoped snapshot of statically reachable source files.
-    Open editor documents override disk content. No Rayfall is evaluated. *)
+(** A bounded snapshot of statically reachable source files. Open editor
+    documents override disk content. No Rayfall is evaluated. *)
 
 val create : roots:string list -> documents:Analysis.t list -> Analysis.t -> t
 
@@ -21,3 +21,22 @@ val references :
 (** Search the current bounded load graph, separating definite references from
     possible matches. Locations, names and kinds identify bindings across
     parses. *)
+
+type snapshot = t
+
+module Cache : sig
+  type t
+
+  val create : unit -> t
+  (** Retain at most four recent entry-document snapshots. *)
+
+  val get :
+    t ->
+    roots:string list ->
+    documents:Analysis.t list ->
+    Analysis.t ->
+    snapshot
+  (** Reuse only while roots and open-document identities match and every
+      observed disk path has the same identity, size, modification and change
+      times. Missing load/configuration candidates are observed too. *)
+end

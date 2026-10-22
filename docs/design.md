@@ -95,9 +95,12 @@ supports `.rayfall-lsp.json` entrypoint and working-directory settings:
 configured runners contribute their literal dependencies, and an explicit
 working directory disambiguates paths. Neither setting establishes actual
 execution order. Next, model execution order where it is statically known;
-dynamic paths and call-time global mutation must remain uncertain. Add cached
-snapshots with dependency invalidation if profiling shows repeated parsing
-is costly, preserving the fresh-snapshot behavior covered by tests.
+dynamic paths and call-time global mutation must remain uncertain. Repeated
+requests now reuse up to four cached snapshots, checking open-document
+identities and dependency/configuration filesystem metadata before reuse.
+Missing load and configuration candidates are checked too. The first request
+after an edit still rebuilds the bounded analysis; incremental analysis and
+reference-search caching remain future work.
 
 Find references now uses declaration locations, names and kinds across the
 bounded load graph. Definite and possible matches remain separate in the core

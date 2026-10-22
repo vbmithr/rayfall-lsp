@@ -43,8 +43,8 @@ See [the design and roadmap](docs/design.md).
 Hover a binding, reference, or literal to inspect known dictionary keys and
 table columns alongside its existing binding information. Ordinary go to
 definition still jumps to the binding or column declaration. In Emacs,
-`M-x eldoc-doc-buffer` displays the full hover when the field list is too long
-for the echo area.
+the optional on-demand setup below displays details with `C-c C-d` in a help
+window, without automatic hover requests while moving the cursor.
 
 Dictionary literals and `(dict [keys] values)` with literal symbol keys expose
 their known keys without evaluating dictionary contents. Aliases retain that
@@ -194,7 +194,7 @@ put `.rayfall-lsp.json` in the project directory:
 The nearest configuration between the current file and its containing
 workspace root applies. Both fields are optional; paths are relative to the
 configuration file, and absolute paths are also accepted. Configuration is
-read again on each request. Invalid configuration is explained in hover and
+checked for changes on each request. Invalid configuration is explained in hover and
 does not disable ordinary literal-load navigation.
 
 `entrypoints` adds the listed runners and their literal dependencies to the
@@ -249,6 +249,19 @@ With an existing Emacs `rayfall-mode` and Eglot:
 (add-hook 'rayfall-mode-hook #'eglot-ensure)
 ```
 
+For on-demand inspection and completion, load the optional helper after Eglot:
+
+```elisp
+(load "~/code/rayfall-lsp/editors/emacs/rayfall-lsp-ui.el")
+```
+
+It disables automatic ElDoc requests and Company idle completion only in
+Eglot-managed Rayfall buffers. Press `C-c C-d` to request semantic details;
+`M-TAB` or `M-x company-complete` requests completion through your existing
+completion providers. This does not add LSP field completion or dictionary
+parameter inference: a callback parameter such as `ctx` may still have no
+known fields. Other modes retain their existing settings.
+
 Ensure `rayfall-lsp` is on Emacs's `exec-path`. Use `M-.` for definitions;
 hover information is available through Eglot/ElDoc. Other LSP clients can
 launch the same command with language ID `rayfall`.
@@ -271,3 +284,31 @@ Tree-sitter and the Rayfall grammar are pinned Git submodules. Neither
 requires local patches. If a dependency needs changes, use a publicly
 fetchable fork and publish its commit before updating the submodule pin.
 Dependency licenses remain in their respective submodules.
+
+## Request caching
+
+The server retains up to four recent project snapshots. Repeated navigation
+and hover requests reuse analysis when editor contents, workspace roots, and
+observed filesystem paths are unchanged. Opening, changing, or closing an
+editor document causes the next request to rebuild its project snapshot.
+Dependencies, configuration candidates (including absent files), and load
+candidates are checked using filesystem identity, size, modification time,
+and change time. Reading a file does not invalidate the cache.
+
+The first request after a change still performs the bounded project analysis;
+this is snapshot caching, not incremental analysis. Filesystem checks rely on
+normal filesystem metadata updates, rather than hashing file contents.
+Reference searches still do additional analysis within the cached graph.
+
+To measure real stdio definition requests on your project:
+
+```sh
+python3 bench/navigation.py --root /path/to/project \
+  --file /path/to/project/report.rfl --symbol bt.ledger \
+  /path/to/old/rayfall-lsp /path/to/new/rayfall-lsp
+```
+
+A local comparison on the backtester `report.rfl` (11 requests per process)
+measured a repeated-request median of 63.39 ms before caching and 0.03 ms after
+caching. First requests took 89.66 ms and 66.70 ms respectively. These are
+single-run observations, not portable performance guarantees.
