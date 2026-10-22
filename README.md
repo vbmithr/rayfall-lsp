@@ -15,7 +15,10 @@ It analyzes source without executing your program or starting Rayforce.
 - Tracking function values through direct aliases, exposed through the
   experimental `rayfall/followValue` request.
 - Dotted-name navigation: on `bt` in `bt.cash0`, find the namespace binding;
-  on `cash0`, find known assignments to that qualified field. A lexical
+  on `cash0`, find known assignments to that qualified field. This also
+  applies to assignment targets: in `(set bt.cash0 ...)`, `bt` is a namespace
+  reference and `cash0` is the field declaration, which resolves to itself.
+  A lexical
   parameter named `bt` takes precedence over an unrelated global namespace.
 - Syntax diagnostics, incomplete source, and UTF-16 editor positions.
 

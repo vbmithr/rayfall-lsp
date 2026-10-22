@@ -22,6 +22,25 @@ let check_int = Alcotest.(check int)
 
 let tests =
   [
+    ( "dotted assignment separates namespace reference and field declaration",
+      fun () ->
+        let s = "(set bt {}) (set bt.buy_policy 'REJECT)" in
+        let a = analyze s in
+        let byte = find s "bt.buy_policy" in
+        let root = occurrence a byte and field = occurrence a (byte + 3) in
+        Alcotest.(check bool) "namespace is a reference" false root.declaration;
+        Alcotest.(check bool) "field is a declaration" true field.declaration;
+        check_int "namespace assignment" (find s "bt {}")
+          (target a byte).location.span.start_byte;
+        check_int "field assignment is itself" byte
+          (target a (byte + 3)).location.span.start_byte );
+    ( "dotted assignment respects lexical namespace shadowing",
+      fun () ->
+        let s = "(set bt {}) (set f (fn [bt] (set bt.buy_policy 'SCALE)))" in
+        let a = analyze s in
+        check_int "namespace parameter"
+          (find s "[bt]" + 1)
+          (target a (find s "bt.buy_policy")).location.span.start_byte );
     ( "dotted access distinguishes namespace and field",
       fun () ->
         let s = "(set bt {}) (set bt.cash0 42) (set report (fn [] bt.cash0))" in
