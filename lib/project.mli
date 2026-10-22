@@ -10,3 +10,14 @@ val analysis : t -> Analysis.t
 val source : t -> string -> Source.t option
 val resolve : t -> Analysis.t -> Analysis.occurrence -> Analysis.resolution
 val issues : t -> string list
+
+type reference_result = {
+  definite : Analysis.location list;
+  possible : Analysis.location list;
+}
+
+val references :
+  t -> include_declaration:bool -> Analysis.binding -> reference_result
+(** Search the current bounded load graph, separating definite references from
+    possible matches. Locations, names and kinds identify bindings across
+    parses. *)

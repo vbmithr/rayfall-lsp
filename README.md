@@ -34,9 +34,29 @@ rebinding of core forms is not modeled. Conditional arms retain lexical
 scope, but their global writes are not assumed to execute. Quoted data is
 not treated as executable references.
 
-Runtime inspection, completion, references, and rename are not implemented
+Runtime inspection, completion, and rename are not implemented
 yet. Dynamic schemas and evaluation remain runtime-dependent.
 See [the design and roadmap](docs/design.md).
+
+## Find references
+
+Use `M-?` (`xref-find-references`) in an Eglot-managed buffer. The server
+implements `textDocument/references`, including `includeDeclaration`.
+References match declaration locations, names, and binding kinds, so lexical
+shadowing and unrelated same-name declarations in other files stay separate.
+Known column aliases use the same identities as definition navigation.
+
+Results include definite matches in the current bounded load graph.
+Candidate globals, uncertain imported column origins, unknown callers, and
+dynamic references are not promoted to definite matches. Invoking the command
+on an ambiguous or runtime-dependent use reports that limitation; selecting
+a declaration searches its definite matches. The server logs the number of
+excluded possible matches. Eglot includes the declaration in its results.
+
+This is not an exhaustive whole-workspace index or a safe rename operation.
+The core API returns definite and possible locations separately, but the
+standard LSP command exposes only definite locations. Unsaved sources are
+used throughout the search.
 
 ## Query navigation
 
@@ -78,7 +98,8 @@ Global table assignments, including alternative assignments, contribute
 candidate column origins rather than guaranteed runtime schemas. Unsaved
 dependency edits refresh those origins. This is bounded structural inference,
 not execution or a complete type checker: arbitrary cross-file computations,
-other join kinds, dynamic constructors, grouped update results, sorting/control clauses,
+other join kinds, dynamic constructors, schemas of function parameters,
+grouped update results, sorting/control clauses,
 and quoted in-place update/delete targets remain unsupported.
 
 Quoted symbols normally remain data. The first argument to the builtin

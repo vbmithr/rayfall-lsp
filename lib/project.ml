@@ -288,3 +288,47 @@ let resolve t analysis (o : Analysis.occurrence) =
     when String.starts_with ~prefix:"global lookup" why ->
       candidates []
   | _ -> o.resolution
+
+type reference_result = {
+  definite : Analysis.location list;
+  possible : Analysis.location list;
+}
+
+let same_binding (a : Analysis.binding) (b : Analysis.binding) =
+  a.name = b.name && a.kind = b.kind && a.location = b.location
+
+let references t ~include_declaration binding =
+  let definite = ref [] and possible = ref [] in
+  List.iter
+    (fun original ->
+      let a =
+        if
+          Source.uri (Analysis.source original)
+          = Source.uri (Analysis.source t.entry)
+        then t.entry
+        else Analysis.analyze ~imports:t.analyses (Analysis.source original)
+      in
+      List.iter
+        (fun (o : Analysis.occurrence) ->
+          if include_declaration || not o.declaration then
+            let location =
+              { Analysis.uri = Source.uri (Analysis.source a); span = o.span }
+            in
+            match resolve t a o with
+            | Analysis.Resolved b when same_binding binding b ->
+                definite := location :: !definite
+            | Analysis.Candidates (bs, _)
+              when List.exists (same_binding binding) bs ->
+                possible := location :: !possible
+            | _ -> ())
+        (Analysis.occurrences a))
+    t.analyses;
+  let compare_location (a : Analysis.location) (b : Analysis.location) =
+    compare
+      (a.uri, a.span.start_byte, a.span.end_byte)
+      (b.uri, b.span.start_byte, b.span.end_byte)
+  in
+  {
+    definite = List.sort_uniq compare_location !definite;
+    possible = List.sort_uniq compare_location !possible;
+  }

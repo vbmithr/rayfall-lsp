@@ -49,6 +49,86 @@ let count = Alcotest.(check int)
 
 let tests =
   [
+    ( "references distinguish lexical shadowing and declarations",
+      fun () ->
+        with_project (fun dir file ->
+            let text =
+              "(set x 0) (set f (fn [x] (+ x x))) (set g (fn [x] x))"
+            in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            let a = Project.analysis p in
+            let b =
+              List.find
+                (fun (b : Analysis.binding) -> b.kind = Parameter)
+                (Analysis.bindings a)
+            in
+            count "only parameter uses" 2
+              (List.length
+                 (Project.references p ~include_declaration:false b).definite);
+            count "include parameter declaration" 3
+              (List.length
+                 (Project.references p ~include_declaration:true b).definite))
+    );
+    ( "reference identity does not use file-local numeric ids",
+      fun () ->
+        with_project (fun dir file ->
+            ignore (file "helper.rfl" "(set h (fn [x] x))");
+            let text = "(load \"helper.rfl\") (set f (fn [x] x))" in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            let a = Project.analysis p in
+            let b =
+              List.find
+                (fun (b : Analysis.binding) -> b.kind = Parameter)
+                (Analysis.bindings a)
+            in
+            let refs = Project.references p ~include_declaration:false b in
+            count "one use in its file" 1 (List.length refs.definite);
+            Alcotest.(check string)
+              "correct file"
+              (Source.uri (Analysis.source a))
+              (List.hd refs.definite).uri) );
+    ( "global candidate references remain separate",
+      fun () ->
+        with_project (fun dir file ->
+            let text = "(set x 1) (set f (fn [] x)) (set x 2) x" in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            let a = Project.analysis p in
+            let b =
+              List.find
+                (fun (b : Analysis.binding) -> b.name = "x")
+                (Analysis.bindings a)
+            in
+            let refs = Project.references p ~include_declaration:false b in
+            count "not a definite use of first assignment" 0
+              (List.length refs.definite);
+            count "one possible call-time use" 1 (List.length refs.possible)) );
+    ( "column references use alias identities",
+      fun () ->
+        with_project (fun dir file ->
+            let text =
+              "(do (let t (table [x] (list [1]))) (let q (select {from: t \
+               amount: x})) (select {from: q value: amount}))"
+            in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            let a = Project.analysis p in
+            let b =
+              List.find
+                (fun (b : Analysis.binding) ->
+                  b.kind = Column && b.name = "amount")
+                (Analysis.bindings a)
+            in
+            count "one alias use" 1
+              (List.length
+                 (Project.references p ~include_declaration:false b).definite))
+    );
     ( "imported table headers and local projection aliases",
       fun () ->
         with_project (fun dir file ->
@@ -67,6 +147,14 @@ let tests =
             let a = Project.analysis p in
             let bs = targets p a "qty" in
             count "imported header" 1 (List.length bs);
+            let refs =
+              Project.references p ~include_declaration:false (List.hd bs)
+            in
+            count "imported column is not a definite runtime reference" 0
+              (List.length refs.definite);
+            count "imported candidate stays separate" 1
+              (List.length refs.possible);
+
             Alcotest.(check string)
               "header URI" helper
               (Lsp.Uri.to_path (Lsp.Uri.of_string (List.hd bs).location.uri));

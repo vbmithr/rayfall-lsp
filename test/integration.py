@@ -201,3 +201,40 @@ with tempfile.TemporaryDirectory(prefix="rayfall joins ") as directory:
         assert result[0]["range"]["start"] == {"line": line, "character": source.splitlines()[line].index(label)}, result
     assert len(replies[4]["result"]) == 2, replies[4]
 print("PASS: grouped aliases through ungroup and join, join-key origins")
+
+with tempfile.TemporaryDirectory(prefix="rayfall references ") as directory:
+    root = Path(directory)
+    uri = (root / "refs.rfl").as_uri()
+    source = '''(set x 0)
+(set f (fn [x] (+ x x)))
+(set g (fn [x] x))
+(set h (fn [] x))
+(do (let t (table [x] (list [1])))
+(let q (select {from: t amount: x}))
+(select {from: q result: amount}))'''
+    def refs(identifier, line, character, include=False):
+        return {"jsonrpc": "2.0", "id": identifier, "method": "textDocument/references",
+                "params": {"textDocument": {"uri": uri}, "position": {"line": line, "character": character}, "context": {"includeDeclaration": include}}}
+    parameter = source.splitlines()[1].index("[x]") + 1
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": root.as_uri()}},
+        notification("initialized", {}),
+        notification("textDocument/didOpen", {"textDocument": {"uri": uri, "version": 1, "languageId": "rayfall", "text": source}}),
+        refs(2, 1, parameter), refs(3, 1, parameter, True),
+        refs(5, 3, source.splitlines()[3].index("x))")),
+        refs(6, 0, 5), refs(8, 5, source.splitlines()[5].index("amount:")),
+        notification("textDocument/didChange", {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": '; é😀\n' + source}]}),
+        refs(4, 2, parameter),
+        {"jsonrpc": "2.0", "id": 9, "method": "shutdown"}, notification("exit", {}),
+    ]
+    replies = run(messages)
+    assert replies[1]["result"]["capabilities"]["referencesProvider"] is True
+    for identifier, line in [(2, 1), (4, 2)]:
+        result = replies[identifier]["result"]
+        assert len(result) == 2 and all(item["uri"] == uri and item["range"]["start"]["line"] == line for item in result), result
+        assert [item["range"]["start"]["character"] for item in result] == [source.splitlines()[1].index("x x"), source.splitlines()[1].index("x x") + 2], result
+    assert len(replies[3]["result"]) == 3, replies[3]
+    assert replies[5]["error"]["code"] == -32803 and "ambiguous" in replies[5]["error"]["message"], replies[5]
+    assert replies[6]["result"] == [], replies[6]
+    assert replies[8]["result"] == [{"uri": uri, "range": {"start": {"line": 6, "character": source.splitlines()[6].index("amount")}, "end": {"line": 6, "character": source.splitlines()[6].index("amount") + len("amount")}}}], replies[8]
+print("PASS: references distinguish shadowing, declarations, aliases, ambiguity, unsaved edits")

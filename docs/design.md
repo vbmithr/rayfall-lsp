@@ -91,9 +91,16 @@ dynamic paths and call-time global mutation must remain uncertain. Add cached
 snapshots with dependency invalidation if profiling shows repeated parsing
 is costly, preserving the fresh-snapshot behavior covered by tests.
 
-Next, add references and completion using the same binding identities.
-Rename should wait until ambiguity and dynamic references can be reported
-and unsafe edits refused.
+Find references now uses declaration locations, names and kinds across the
+bounded load graph. Definite and possible matches remain separate in the core
+API; standard LSP exposes definite matches and rejects ambiguous targets.
+This is not an exhaustive workspace index and is not sufficient for rename.
+
+Next, extend reference coverage and add completion using those identities.
+Inferring table schemas for function parameters is also still missing: a
+query over an unannotated parameter cannot trace its columns back to callers.
+Rename should wait until incomplete and ambiguous reference sets can be
+reported and unsafe edits refused.
 
 Finally, consider an opt-in Rayforce protocol for live values, definition
 identities, and source locations. Runtime observations must identify their

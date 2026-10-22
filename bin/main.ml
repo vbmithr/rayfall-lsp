@@ -146,6 +146,7 @@ let handle_request method_ params =
               ( "textDocumentSync",
                 obj [ ("openClose", `Bool true); ("change", `Int 1) ] );
               ("definitionProvider", `Bool true);
+              ("referencesProvider", `Bool true);
               ("hoverProvider", `Bool true);
             ] );
       ])
@@ -168,6 +169,42 @@ let handle_request method_ params =
               List.map
                 (fun (b : Analysis.binding) -> location project b.location)
                 (Analysis.targets (Project.resolve project a o)))
+    | "textDocument/references" -> (
+        let project, a, occurrence = document_at params in
+        match occurrence with
+        | None -> `List []
+        | Some o -> (
+            match Project.resolve project a o with
+            | Analysis.Resolved binding ->
+                let include_declaration =
+                  Json.to_bool
+                    (member "includeDeclaration" (member "context" params))
+                in
+                let refs =
+                  Project.references project ~include_declaration binding
+                in
+                notify "window/logMessage"
+                  (`Assoc
+                     [
+                       ("type", `Int 3);
+                       ( "message",
+                         string
+                           (Printf.sprintf
+                              "Reference search covers this load graph and \
+                               returns definite matches only; %d possible \
+                               matches excluded. Dynamic uses may be absent."
+                              (List.length refs.possible)) );
+                     ]);
+                `List (List.map (location project) refs.definite)
+            | Analysis.Candidates _ | Analysis.Runtime_dependent _ ->
+                Jsonrpc.Response.Error.raise
+                  (Jsonrpc.Response.Error.make ~code:RequestFailed
+                     ~message:
+                       "Reference target is runtime-dependent or ambiguous. \
+                        Select a declaration to search its definite \
+                        references; possible matches are excluded."
+                     ())
+            | Analysis.Unresolved _ | Analysis.Builtin _ -> `List []))
     | "textDocument/hover" -> (
         let project, a, o = document_at params in
         match o with
