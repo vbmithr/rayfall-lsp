@@ -97,6 +97,10 @@ let builtin_names =
     "table";
     "xasc";
     "xdesc";
+    "ungroup";
+    "left-join";
+    "inner-join";
+    "full-join";
     "alter";
     "at";
     "get";
@@ -451,7 +455,8 @@ let analyze ?(imports = []) source =
                   | _ -> None
                 in
                 (env, { unknown with schema }))
-              else if special && List.mem name [ "xasc"; "xdesc" ] then (
+              else if special && List.mem name [ "xasc"; "xdesc"; "ungroup" ]
+              then (
                 head_ref ();
                 match args with
                 | first :: rest ->
@@ -459,6 +464,98 @@ let analyze ?(imports = []) source =
                     let env, _ = sequence (depth + 1) env rest in
                     (env, v)
                 | [] -> (env, unknown))
+              else if
+                special
+                && List.mem name [ "left-join"; "inner-join"; "full-join" ]
+              then (
+                head_ref ();
+                let env, values =
+                  List.fold_left
+                    (fun (env, vs) arg ->
+                      let env, v = walk (depth + 1) env arg in
+                      (env, (arg, v) :: vs))
+                    (env, []) args
+                in
+                let inputs =
+                  match List.rev values with
+                  | [ (keys, _); (_, left); (_, right) ]
+                    when (node keys).kind = "vector" ->
+                      Some (keys, left, right)
+                  | [ (_, left); (_, right); (keys, _) ]
+                    when (node keys).kind = "vector" ->
+                      Some (keys, left, right)
+                  | _ -> None
+                in
+                let schema =
+                  Option.bind inputs (fun (keys, left, right) ->
+                      let key_nodes = children keys in
+                      if
+                        key_nodes = []
+                        || not
+                             (List.for_all
+                                (fun i -> (node i).kind = "identifier")
+                                key_nodes)
+                      then None
+                      else
+                        match (left.schema, right.schema) with
+                        | Some l, Some r
+                          when List.for_all
+                                 (fun key ->
+                                   Names.mem (text key) l.columns
+                                   && Names.mem (text key) r.columns)
+                                 key_nodes ->
+                            let distinct bs =
+                              List.sort_uniq
+                                (fun a b ->
+                                  compare
+                                    ( a.location.uri,
+                                      a.location.span.start_byte,
+                                      a.location.span.end_byte )
+                                    ( b.location.uri,
+                                      b.location.span.start_byte,
+                                      b.location.span.end_byte ))
+                                bs
+                            in
+                            let names = List.map text key_nodes in
+                            List.iter
+                              (fun key ->
+                                let bs =
+                                  distinct
+                                    (Names.find (text key) l.columns
+                                    @ Names.find (text key) r.columns)
+                                in
+                                remember key (text key)
+                                  (`Known
+                                     (Candidates
+                                        ( bs,
+                                          "join key refers to both input tables"
+                                        )))
+                                  unknown)
+                              key_nodes;
+                            let columns =
+                              Names.union
+                                (fun key left right ->
+                                  if List.mem key names && name = "full-join"
+                                  then Some (distinct (left @ right))
+                                  else Some left)
+                                l.columns
+                                (Names.filter
+                                   (fun key _ ->
+                                     (not (List.mem key names))
+                                     || name = "full-join")
+                                   r.columns)
+                            in
+                            Some
+                              {
+                                columns;
+                                complete = l.complete && r.complete;
+                                certain =
+                                  l.certain && r.certain && l.complete
+                                  && r.complete;
+                              }
+                        | _ -> None)
+                in
+                (env, { unknown with schema }))
               else if special && name = "alter" then (
                 head_ref ();
                 match args with
@@ -618,6 +715,34 @@ let analyze ?(imports = []) source =
                         grouping_known := false;
                         opaque pair "grouping schema is unknown")
                   (children expr)
+              else if (node expr).kind = "identifier" then (
+                ignore (walk (depth + 1) qenv expr);
+                let b = add ~record:false Column expr (text expr) unknown in
+                outputs := Names.add b.name [ b ] !outputs)
+              else if
+                (node expr).kind = "vector"
+                && List.for_all
+                     (fun j -> (node j).kind = "identifier")
+                     (children expr)
+              then (
+                if children expr = [] then grouped := false;
+                List.iter
+                  (fun j ->
+                    let column =
+                      Option.bind source_value.schema (fun (schema : schema) ->
+                          Names.find_opt (text j) schema.columns)
+                    in
+                    let resolution =
+                      match column with
+                      | Some bs ->
+                          Candidates (bs, "grouping vector names source columns")
+                      | None ->
+                          Runtime_dependent "grouping column schema is unknown"
+                    in
+                    remember j (text j) (`Known resolution) unknown;
+                    let b = add ~record:false Column j (text j) unknown in
+                    outputs := Names.add b.name [ b ] !outputs)
+                  (children expr))
               else (
                 grouping_known := false;
                 ignore (walk (depth + 1) qenv expr)))
@@ -635,6 +760,21 @@ let analyze ?(imports = []) source =
             if !deletion then None else source_value.schema
           else if verb = "select" && !projections = 0 && not !grouped then
             source_value.schema
+          else if verb = "select" && !projections = 0 then
+            let base =
+              Option.value source_value.schema
+                ~default:
+                  { columns = Names.empty; complete = false; certain = true }
+            in
+            Some
+              {
+                base with
+                columns =
+                  Names.union
+                    (fun _ _ newer -> Some newer)
+                    base.columns !outputs;
+                complete = base.complete && !grouping_known;
+              }
           else if verb = "select" then
             Some
               { columns = !outputs; complete = !grouping_known; certain = true }

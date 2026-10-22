@@ -22,6 +22,94 @@ let check_int = Alcotest.(check int)
 
 let tests =
   [
+    ( "self join does not duplicate column origins",
+      fun () ->
+        let s =
+          "(do (let t (table [id x] (list [1] [2]))) (let j (full-join [id] t \
+           t)) (select {from: j key: id}))"
+        in
+        let a = analyze s in
+        check_int "single self-join key origin" 1
+          (List.length
+             (Analysis.targets (occurrence a (find s "key: id" + 5)).resolution))
+    );
+    ( "joins carry columns from both inputs in either argument order",
+      fun () ->
+        List.iter
+          (fun verb ->
+            List.iter
+              (fun key_first ->
+                let call =
+                  if key_first then "(" ^ verb ^ " [id] l r)"
+                  else "(" ^ verb ^ " l r [id])"
+                in
+                let s =
+                  "(do (let l (table [id price] (list [1] [10]))) (let r \
+                   (table [id qty] (list [1] [2]))) (let j " ^ call
+                  ^ ") (select {from: j p: price q: qty}))"
+                in
+                let a = analyze s in
+                check_int "left column" (find s "price]")
+                  (target a (find s "p: price" + 3)).location.span.start_byte;
+                check_int "right column" (find s "qty]")
+                  (target a (find s "q: qty" + 3)).location.span.start_byte)
+              [ true; false ])
+          [ "left-join"; "inner-join"; "full-join" ] );
+    ( "join collisions use left and full keys retain both origins",
+      fun () ->
+        let s =
+          "(do (let l (table [id x] (list [1] [10]))) (let r (table [id x] \
+           (list [2] [20]))) (let j (full-join [id] l r)) (select {from: j \
+           key: id value: x}))"
+        in
+        let a = analyze s in
+        check_int "left duplicate column wins" (find s "x]")
+          (target a (find s "value: x" + 7)).location.span.start_byte;
+        check_int "full key has both origins" 2
+          (List.length
+             (Analysis.targets (occurrence a (find s "key: id" + 5)).resolution))
+    );
+    ( "dynamic join keys do not invent a schema",
+      fun () ->
+        let s =
+          "(set f (fn [keys] (let l (table [id x] (list [1] [2]))) (let r \
+           (table [id y] (list [1] [3]))) (let j (left-join keys l r)) (select \
+           {from: j value: x})))"
+        in
+        let a = analyze s in
+        check_int "unknown join output" 0
+          (List.length
+             (Analysis.targets (occurrence a (find s "value: x" + 7)).resolution))
+    );
+    ( "grouping keys and other columns survive ungroup",
+      fun () ->
+        List.iter
+          (fun by ->
+            let s =
+              "(do (let t (table [sym qty] (list [X] [2]))) (let g (select \
+               {from: t by: " ^ by
+              ^ "})) (let u (ungroup g)) (select {from: u s: sym q: qty}))"
+            in
+            let a = analyze s in
+            check_int "group key label"
+              (find s ("by: " ^ by) + 4 + if by = "[sym]" then 1 else 0)
+              (target a (find s "s: sym" + 3)).location.span.start_byte;
+            check_int "non-key preserved" (find s "qty]")
+              (target a (find s "q: qty" + 3)).location.span.start_byte)
+          [ "sym"; "[sym]" ] );
+    ( "grouped projections survive ungroup and joins",
+      fun () ->
+        let s =
+          "(do (let t (table [sym qty] (list [X] [2]))) (let g (select {from: \
+           t by: {sym: sym} amount: (sum qty)})) (let r (table [sym fee] (list \
+           [X] [1]))) (let j (left-join [sym] (ungroup g) r)) (select {from: j \
+           a: amount f: fee}))"
+        in
+        let a = analyze s in
+        check_int "group alias origin" (find s "amount:")
+          (target a (find s "a: amount" + 3)).location.span.start_byte;
+        check_int "joined fee origin" (find s "fee]")
+          (target a (find s "f: fee" + 3)).location.span.start_byte );
     ( "literal table columns and calculated aliases",
       fun () ->
         let s =

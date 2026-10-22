@@ -177,3 +177,27 @@ with tempfile.TemporaryDirectory(prefix="rayfall columns ") as directory:
     assert replies[6]["result"] == [] and replies[8]["result"] == []
     assert replies[7]["result"]["contents"]["value"] == "Column: units"
 print("PASS: imported column headers, aliases, alter symbols, dependency schema edits")
+
+with tempfile.TemporaryDirectory(prefix="rayfall joins ") as directory:
+    root = Path(directory)
+    uri = (root / "report.rfl").as_uri()
+    source = '''(do
+(let t (table [sym qty] (list [X] [2])))
+(let g (select {from: t by: [sym] amount: (sum qty)}))
+(let r (table [sym fee] (list [X] [1])))
+(let j (left-join [sym] (ungroup g) r))
+(select {from: j total: (+ amount fee)}))'''
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": root.as_uri()}},
+        notification("initialized", {}),
+        notification("textDocument/didOpen", {"textDocument": {"uri": uri, "version": 1, "languageId": "rayfall", "text": source}}),
+        query(2, 5, "amount"), query(3, 5, "fee"), query(4, 4, "sym"),
+        {"jsonrpc": "2.0", "id": 5, "method": "shutdown"}, notification("exit", {}),
+    ]
+    replies = run(messages)
+    for identifier, line, label in [(2, 2, "amount:"), (3, 3, "fee]")]:
+        result = replies[identifier]["result"]
+        assert len(result) == 1 and result[0]["uri"] == uri, result
+        assert result[0]["range"]["start"] == {"line": line, "character": source.splitlines()[line].index(label)}, result
+    assert len(replies[4]["result"]) == 2, replies[4]
+print("PASS: grouped aliases through ungroup and join, join-key origins")

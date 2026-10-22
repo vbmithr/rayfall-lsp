@@ -45,7 +45,10 @@ and ungrouped updates. Loaded global table declarations are schema hints;
 call-time mutation keeps their origins uncertain. After collecting the bounded
 load graph, the current document is analyzed again with these hints so imported
 headers and local query aliases can supply navigation targets. Dependencies
-are not iterated to a whole-project type-inference fixed point. Joins, arbitrary
+are not iterated to a whole-project type-inference fixed point. Literal-key
+left, inner, and full joins preserve known input column origins, and `ungroup`
+preserves names across row flattening. Grouping key labels and non-key
+passthrough columns survive those operations. Other join kinds, arbitrary
 dynamic schemas, grouped update outputs, and control clauses remain future work.
 
 Quoted symbols stay data except in recognized reference positions. The first

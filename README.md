@@ -56,18 +56,29 @@ candidates, with hover explaining that a column could shadow the namespace.
 A lexical namespace parameter still takes precedence.
 
 Literal `(table [price qty] ...)` headers define column origins. Known schemas
-follow local aliases, `xasc`/`xdesc`, projections, and ungrouped updates. A query
+follow local aliases, `xasc`/`xdesc`, `ungroup`, projections, and ungrouped
+updates. A query
 reading `price` can jump to its header. A later query reading a calculated
 alias such as `notional: (* price qty)` can jump to that output label, whose
 expression in turn links to the source columns. Dictionary-form grouping
-labels also define output columns. Lexical parameters still take precedence.
+labels also define output columns. Bare-name and literal-vector grouping keys
+preserve output names; a grouped passthrough retains non-key columns too.
+Literal grouping vectors refer to source columns, while bare expressions keep
+lexical lookup precedence.
+
+With literal key vectors and known input schemas, `left-join`, `inner-join`,
+and `full-join` carry column origins from both inputs. Both argument orders
+are supported. Non-key name collisions use the left origin, matching ordinary
+Rayforce named lookup. Left/inner output keys retain the left origin; full
+join keys can originate from either input. The key vector itself refers to
+both inputs. Unknown schemas and dynamic join keys remain conservative.
 
 Loaded literal table declarations enrich the current document's analysis.
 Global table assignments, including alternative assignments, contribute
 candidate column origins rather than guaranteed runtime schemas. Unsaved
 dependency edits refresh those origins. This is bounded structural inference,
 not execution or a complete type checker: arbitrary cross-file computations,
-joins, dynamic constructors, grouped update results, sorting/control clauses,
+other join kinds, dynamic constructors, grouped update results, sorting/control clauses,
 and quoted in-place update/delete targets remain unsupported.
 
 Quoted symbols normally remain data. The first argument to the builtin
