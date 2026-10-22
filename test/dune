@@ -1,0 +1,9 @@
+(test
+ (name test_core)
+ (libraries rayfall-lsp.core alcotest))
+
+(rule
+ (alias runtest)
+ (deps integration.py ../bin/main.exe)
+ (action
+  (run python3 %{dep:integration.py} %{dep:../bin/main.exe})))

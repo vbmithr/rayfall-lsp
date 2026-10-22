@@ -1,0 +1,5 @@
+(executable
+ (name main)
+ (public_name rayfall-lsp)
+ (package rayfall-lsp)
+ (libraries rayfall-lsp.core jsonrpc lsp yojson unix))

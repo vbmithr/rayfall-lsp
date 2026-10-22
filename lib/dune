@@ -1,0 +1,25 @@
+(library
+ (name rayfall)
+ (public_name rayfall-lsp.core)
+ (libraries yojson uutf unix)
+ (foreign_stubs
+  (language c)
+  (names tree_sitter_runtime rayfall_grammar syntax_stubs)
+  (flags
+   (:standard -std=c11 -D_DEFAULT_SOURCE))
+  (include_dirs
+   ../vendor/tree-sitter/lib/include
+   ../vendor/tree-sitter/lib/src
+   ../vendor/tree-sitter-rayfall/src)))
+
+(rule
+ (target tree_sitter_runtime.c)
+ (deps
+  (source_tree ../vendor/tree-sitter/lib/src))
+ (action
+  (copy ../vendor/tree-sitter/lib/src/lib.c %{target})))
+
+(rule
+ (target rayfall_grammar.c)
+ (action
+  (copy ../vendor/tree-sitter-rayfall/src/parser.c %{target})))

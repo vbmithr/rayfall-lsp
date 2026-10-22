@@ -1,0 +1,6 @@
+[submodule "vendor/tree-sitter-rayfall"]
+	path = vendor/tree-sitter-rayfall
+	url = https://github.com/vbmithr/tree-sitter-rayfall.git
+[submodule "vendor/tree-sitter"]
+	path = vendor/tree-sitter
+	url = https://github.com/tree-sitter/tree-sitter.git

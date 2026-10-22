@@ -1,0 +1,20 @@
+(lang dune 3.14)
+(name rayfall-lsp)
+(generate_opam_files true)
+(source (github vbmithr/rayfall-lsp))
+(authors "Vincent Bernardoff")
+(maintainers "Vincent Bernardoff")
+(license MIT)
+(package
+ (name rayfall-lsp)
+ (synopsis "Semantic navigation and language server for Rayfall")
+ (description "An editor-independent Rayfall analyzer and LSP server. Early prototype: conservative static binding navigation, no project evaluation.")
+ (depends
+  (ocaml (>= 4.14))
+  (dune (>= 3.14))
+  (yojson (>= 2.0))
+  (jsonrpc (>= 1.20))
+  (lsp (>= 1.20))
+  uutf
+  (alcotest :with-test)
+  (ocamlformat :with-dev-setup)))

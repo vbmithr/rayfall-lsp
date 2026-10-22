@@ -1,0 +1,22 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ocaml-compiler: [4.14.2, 5.2.1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: ${{ matrix.ocaml-compiler }}
+      - run: opam install . --deps-only --with-test
+      - run: opam exec -- dune build @all
+      - run: opam exec -- dune runtest
+      - run: opam install ocamlformat.0.29.0
+      - run: opam exec -- dune build @fmt
