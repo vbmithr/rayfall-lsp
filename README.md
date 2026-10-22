@@ -43,8 +43,8 @@ See [the design and roadmap](docs/design.md).
 Hover a binding, reference, or literal to inspect known dictionary keys and
 table columns alongside its existing binding information. Ordinary go to
 definition still jumps to the binding or column declaration. In Emacs,
-the optional on-demand setup below displays details with `C-c C-d` in a help
-window, without automatic hover requests while moving the cursor.
+the optional on-demand setup below displays details near point with `C-c C-d`,
+without automatic hover requests while moving the cursor.
 
 Dictionary literals and `(dict [keys] values)` with literal symbol keys expose
 their known keys without evaluating dictionary contents. Aliases retain that
@@ -256,7 +256,13 @@ For on-demand inspection and completion, load the optional helper after Eglot:
 ```
 
 It disables automatic ElDoc requests and Company idle completion only in
-Eglot-managed Rayfall buffers. Press `C-c C-d` to request semantic details;
+Eglot-managed Rayfall buffers. Press `C-c C-d` to request semantic details in
+a read-only popup using `posframe` and Company tooltip colors. The popup is
+limited to 90 columns and 18 lines and disappears on the next command.
+It is inspection, so selecting text cannot insert it as a completion.
+Use `C-u C-c C-d` for a help window containing the full details. Without
+`posframe` or a graphical display, inspection falls back to that help window.
+Replies received after moving point or editing the buffer are discarded.
 `M-TAB` or `M-x company-complete` requests completion through your existing
 completion providers. This does not add LSP field completion or dictionary
 parameter inference: a callback parameter such as `ctx` may still have no
