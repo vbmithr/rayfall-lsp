@@ -16,8 +16,12 @@ value origins from that snapshot. The LSP layer maps document versions and
 UTF-16 positions to these results.
 
 The server analyzes unsaved documents and never evaluates source. Analysis
-currently stays within one document. Input size and analysis nesting are
-bounded; syntax errors produce diagnostics and conservative results.
+follows literal-load dependencies for cross-file binding navigation. Each
+request builds a fresh bounded dependency snapshot; open buffers override
+disk sources. Relative paths are searched from the importer up to its nearest
+workspace root, retaining all existing matches as candidates. Cycles terminate
+by canonical file identity. Input size and analysis nesting are bounded;
+syntax errors produce diagnostics and conservative results.
 
 Sequential bindings and lexical parameters can have precise targets.
 References to globals inside functions are deferred: their meaning can
@@ -54,10 +58,13 @@ shadowing, closure capture, namespaces, destructuring, and control flow.
 Every new precise result should have a regression fixture; uncertain cases
 must remain visibly uncertain.
 
-Then introduce a project model with explicit roots and load paths. Index
-files without executing them, track load order where it is statically
-known, and invalidate dependent snapshots after edits. Cross-file navigation
-must distinguish a known load target from a guessed filename match.
+The initial project model now follows literal loads without executing them,
+uses workspace roots, and refreshes dependency snapshots after edits. Extend
+it with explicit runtime load paths and entrypoints, then model execution
+order where it is statically known. The current model returns candidates
+rather than assuming a working directory or final assignment. Add cached
+snapshots with dependency invalidation if profiling shows repeated parsing
+is costly, preserving the fresh-snapshot behavior covered by tests.
 
 Next, add references and completion using the same binding identities.
 Rename should wait until ambiguity and dynamic references can be reported

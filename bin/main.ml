@@ -36,6 +36,7 @@ let int j = Json.to_int j
 let obj xs = `Assoc xs
 let string s = `String s
 let docs : (string, Analysis.t) Hashtbl.t = Hashtbl.create 16
+let roots = ref []
 let initialized = ref false
 let stopped = ref false
 
@@ -87,12 +88,11 @@ let open_document uri version text =
           ];
       ]
 
-let location analysis (l : Analysis.location) =
-  obj
-    [
-      ("uri", string l.uri);
-      ("range", Source.range_json (Analysis.source analysis) l.span);
-    ]
+let location project (l : Analysis.location) =
+  match Project.source project l.uri with
+  | None -> invalid_arg "Definition snapshot is unavailable"
+  | Some source ->
+      obj [ ("uri", string l.uri); ("range", Source.range_json source l.span) ]
 
 let params_json = function None -> obj [] | Some p -> (p :> Yojson.Safe.t)
 
@@ -104,11 +104,33 @@ let document_at params =
     Source.offset (Analysis.source analysis)
       { line = int (member "line" p); character = int (member "character" p) }
   in
-  (analysis, Analysis.at analysis byte)
+  let project =
+    Project.create ~roots:!roots
+      ~documents:(Hashtbl.fold (fun _ a xs -> a :: xs) docs [])
+      analysis
+  in
+  (project, analysis, Analysis.at analysis byte)
 
 let handle_request method_ params =
   if method_ = "initialize" then (
     if !initialized then invalid_arg "Already initialized";
+    let root_uris =
+      match member "workspaceFolders" params with
+      | `List folders ->
+          List.filter_map
+            (fun f ->
+              match member "uri" f with `String u -> Some u | _ -> None)
+            folders
+      | _ -> (
+          match member "rootUri" params with `String u -> [ u ] | _ -> [])
+    in
+    roots :=
+      List.filter_map
+        (fun uri ->
+          if String.starts_with ~prefix:"file:///" uri then
+            Some (Lsp.Uri.to_path (Lsp.Uri.of_string uri))
+          else None)
+        root_uris;
     initialized := true;
     obj
       [
@@ -137,16 +159,16 @@ let handle_request method_ params =
   else
     match method_ with
     | "textDocument/definition" ->
-        let a, o = document_at params in
+        let project, a, o = document_at params in
         `List
           (match o with
           | None -> []
           | Some o ->
               List.map
-                (fun (b : Analysis.binding) -> location a b.location)
-                (Analysis.targets o.resolution))
+                (fun (b : Analysis.binding) -> location project b.location)
+                (Analysis.targets (Project.resolve project a o)))
     | "textDocument/hover" -> (
-        let a, o = document_at params in
+        let project, a, o = document_at params in
         match o with
         | None -> `Null
         | Some o ->
@@ -156,12 +178,18 @@ let handle_request method_ params =
                   obj
                     [
                       ("kind", string "plaintext");
-                      ("value", string (Analysis.describe o.resolution));
+                      ( "value",
+                        string
+                          (Analysis.describe (Project.resolve project a o)
+                          ^
+                          match Project.issues project with
+                          | [] -> ""
+                          | xs -> "\n" ^ String.concat "\n" xs) );
                     ] );
                 ("range", Source.range_json (Analysis.source a) o.span);
               ])
     | "rayfall/followValue" -> (
-        let a, o = document_at params in
+        let project, _a, o = document_at params in
         match o with
         | None ->
             obj [ ("status", string "unresolved"); ("locations", `List []) ]
@@ -172,7 +200,7 @@ let handle_request method_ params =
                   string
                     (if o.origin_unknown then "runtime-dependent"
                      else "resolved") );
-                ("locations", `List (List.map (location a) o.origins));
+                ("locations", `List (List.map (location project) o.origins));
               ])
     | _ ->
         Jsonrpc.Response.Error.raise

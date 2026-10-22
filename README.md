@@ -7,7 +7,9 @@ It analyzes source without executing your program or starting Rayforce.
 ## What works
 
 - Go to definition for parameters, local bindings, and sequential global
-  bindings within the current document, including unsaved changes.
+  bindings, including unsaved changes.
+- Cross-file candidate definitions through literal `load` dependencies,
+  including transitive loads and unsaved dependency buffers.
 - Hover explanations distinguishing known bindings, candidate definitions,
   runtime-dependent names, and unresolved names.
 - Tracking function values through direct aliases, exposed through the
@@ -24,9 +26,39 @@ rebinding of core forms is not modeled. Conditional arms retain lexical
 scope, but their global writes are not assumed to execute. Quoted data is
 not treated as executable references.
 
-Cross-file loading, runtime inspection, completion, references, and rename
-are not implemented yet. Query column resolution and dynamic evaluation
-remain runtime-dependent. See [the design and roadmap](docs/design.md).
+Runtime inspection, completion, references, and rename are not implemented
+yet. Query column resolution and dynamic evaluation remain runtime-dependent.
+See [the design and roadmap](docs/design.md).
+
+## Cross-file navigation
+
+For `(load "helpers.rfl")`, the server follows literal paths without running
+Rayfall. Relative paths are tried from the importing file's directory and
+each ancestor up to the nearest containing LSP workspace root. Without a
+workspace root, only the importing directory is searched. Absolute paths
+are supported. If several paths exist, all remain candidates.
+
+This also handles a strategy loading `strategies/common.rfl` while stored
+inside `strategies/`: the path can resolve from its parent directory.
+Only files reachable through recognized literal loads are included; unrelated
+workspace files and runtime session globals are not searched.
+
+Imported assignments are candidate definitions, not a claim about which
+assignment ran last. Go to definition may return several locations, and hover
+explains the uncertainty. Dynamic load paths, missing files, and analysis
+limits appear in hover information. Unsupported control flow may hide loads.
+Core-form shadowing is respected; an ordinary function named `load` is not
+followed as a dependency.
+
+Open editor documents override disk content, including unsaved files. Each
+navigation request builds a fresh bounded dependency snapshot, so dependency
+edits, closes, and disk changes do not leave stale targets. Analysis currently
+allows 128 files, 32 load edges in depth, and 16 MiB of source per request,
+with a 4 MiB limit per file. Only regular files are read. Large dependency
+graphs may return a partial set of candidates, with a hover explanation.
+
+Cross-file function-value origin tracking and exact load-order modeling are
+still future work; this milestone adds binding navigation.
 
 ## Build and test
 
@@ -76,8 +108,9 @@ dune runtest
 ```
 
 Tests cover binding and value origins, lexical shadowing, deferred globals,
-literal data, incomplete syntax, UTF-16 positions, and a real stdio LSP
-session with unsaved edits. See [CONTRIBUTING.md](CONTRIBUTING.md).
+literal data, incomplete syntax, UTF-16 positions, dependency cycles,
+transitive loads, ambiguous targets, and live-buffer overlays. Real stdio LSP
+sessions exercise unsaved edits and cross-file target ranges. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Tree-sitter and the Rayfall grammar are pinned Git submodules. Neither
 requires local patches. If a dependency needs changes, use a publicly

@@ -1,5 +1,6 @@
 (test
  (name test_core)
+ (modules test_core)
  (libraries rayfall-lsp.core alcotest))
 
 (rule
@@ -7,3 +8,8 @@
  (deps integration.py ../bin/main.exe)
  (action
   (run python3 %{dep:integration.py} %{dep:../bin/main.exe})))
+
+(test
+ (name test_project)
+ (modules test_project)
+ (libraries rayfall-lsp.core alcotest lsp unix))

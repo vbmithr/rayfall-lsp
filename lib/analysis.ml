@@ -26,11 +26,14 @@ type occurrence = {
   origin_unknown : bool;
 }
 
+type load = { path : string option; span : Source.span }
+
 type t = {
   source : Source.t;
   syntax : Syntax.t;
   bindings : binding list;
   occurrences : occurrence list;
+  loads : load list;
 }
 
 type value_info = { origins : location list; unknown : bool }
@@ -95,6 +98,7 @@ let source t = t.source
 let syntax t = t.syntax
 let bindings t = t.bindings
 let occurrences t = t.occurrences
+let loads t = t.loads
 
 let targets = function
   | Resolved b -> [ b ]
@@ -116,14 +120,19 @@ let describe = function
 let at t byte =
   match
     List.find_opt
-      (fun o -> o.span.start_byte <= byte && byte < o.span.end_byte)
+      (fun (o : occurrence) ->
+        o.span.start_byte <= byte && byte < o.span.end_byte)
       t.occurrences
   with
   | Some _ as o -> o
-  | None -> List.find_opt (fun o -> o.span.end_byte = byte) t.occurrences
+  | None ->
+      List.find_opt
+        (fun (o : occurrence) -> o.span.end_byte = byte)
+        t.occurrences
 
 let analyze source =
   let syntax = Syntax.parse source in
+  let loads = ref [] in
   let bindings = ref []
   and pending = ref []
   and values = Hashtbl.create 32
@@ -227,6 +236,18 @@ let analyze source =
                      [ "while"; "times"; "try"; "eval"; "resolve"; "load" ]
               then (
                 head_ref ();
+                (if name = "load" then
+                   let path =
+                     match args with
+                     | [ arg ] when (node arg).kind = "string" -> (
+                         try
+                           match Yojson.Safe.from_string (text arg) with
+                           | `String s -> Some s
+                           | _ -> None
+                         with Yojson.Json_error _ -> None)
+                     | _ -> None
+                   in
+                   loads := { path; span = (node i).span } :: !loads);
                 List.iter
                   (fun j ->
                     opaque j
@@ -348,4 +369,4 @@ let analyze source =
         })
       !pending
   in
-  { source; syntax; bindings; occurrences }
+  { source; syntax; bindings; occurrences; loads = List.rev !loads }

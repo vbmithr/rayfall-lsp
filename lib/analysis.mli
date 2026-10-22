@@ -24,9 +24,11 @@ type occurrence = {
   origin_unknown : bool;
 }
 
+type load = { path : string option; span : Source.span }
 type t
 
 val analyze : Source.t -> t
+val loads : t -> load list
 val source : t -> Source.t
 val syntax : t -> Syntax.t
 val bindings : t -> binding list

@@ -1,7 +1,7 @@
 (library
  (name rayfall)
  (public_name rayfall-lsp.core)
- (libraries yojson uutf unix)
+ (libraries yojson uutf unix lsp)
  (foreign_stubs
   (language c)
   (names tree_sitter_runtime rayfall_grammar syntax_stubs)
