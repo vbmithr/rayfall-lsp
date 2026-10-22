@@ -29,6 +29,27 @@ let tests =
         check_int "parameter"
           (find s "[x]" + 1)
           (target a (find s "x 2")).location.span.start_byte );
+    ( "parameters after load and inside conditional",
+      fun () ->
+        let s =
+          "(load \"helpers.rfl\") (set f (fn [ctx] (if (ready ctx) 0 (do (let \
+           y (at ctx 'k)) (+ y 1)))))"
+        in
+        let a = analyze s in
+        let parameter = find s "[ctx]" + 1 in
+        check_int "condition parameter" parameter
+          (target a (find s "ctx) 0")).location.span.start_byte;
+        check_int "branch parameter" parameter
+          (target a (find s "ctx 'k")).location.span.start_byte;
+        check_int "branch local" (find s "y (at")
+          (target a (find s "y 1")).location.span.start_byte );
+    ( "parameters after unknown calls",
+      fun () ->
+        let s = "(custom_setup) (set f (fn [x] (custom x) (+ x 1)))" in
+        let a = analyze s in
+        check_int "parameter survives unknown calls"
+          (find s "[x]" + 1)
+          (target a (find s "x 1")).location.span.start_byte );
     ( "local and do scope",
       fun () ->
         let s = "(set x 1) (do (let x 2) (+ x 1)) (+ x 3)" in

@@ -203,8 +203,7 @@ let analyze source =
           | head :: args ->
               let name = text head in
               let shadowed =
-                local env name <> None
-                || Names.mem name env.globals || env.opaque
+                local env name <> None || Names.mem name env.globals
               in
               let special = (node head).kind = "identifier" && not shadowed in
               let head_ref () =
@@ -213,12 +212,19 @@ let analyze source =
               if special && name = "quote" then (
                 head_ref ();
                 (env, unknown))
+              else if special && name = "if" then (
+                head_ref ();
+                (* Analyze each arm separately: lexical parameters remain in
+                   scope, but branch writes cannot establish later globals. *)
+                List.iter
+                  (fun j ->
+                    ignore (walk (depth + 1) { env with opaque = true } j))
+                  args;
+                ({ env with opaque = true }, unknown))
               else if
                 special
                 && List.mem name
-                     [
-                       "if"; "while"; "times"; "try"; "eval"; "resolve"; "load";
-                     ]
+                     [ "while"; "times"; "try"; "eval"; "resolve"; "load" ]
               then (
                 head_ref ();
                 List.iter

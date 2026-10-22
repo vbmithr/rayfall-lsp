@@ -17,7 +17,12 @@ It analyzes source without executing your program or starting Rayforce.
 Function bodies can run after globals change. Global references inside them
 therefore return candidate definitions rather than claiming a unique target.
 Unknown calls and dynamic forms also make subsequent global resolution
-conservative. Quoted data is not treated as executable references.
+conservative. They do not erase lexical parameters or stop recognition of
+later core forms such as `fn` and `let`. Core forms are assumed to retain
+their standard meaning unless explicitly shadowed in the document; dynamic
+rebinding of core forms is not modeled. Conditional arms retain lexical
+scope, but their global writes are not assumed to execute. Quoted data is
+not treated as executable references.
 
 Cross-file loading, runtime inspection, completion, references, and rename
 are not implemented yet. Query column resolution and dynamic evaluation

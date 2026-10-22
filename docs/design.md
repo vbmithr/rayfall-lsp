@@ -22,8 +22,12 @@ bounded; syntax errors produce diagnostics and conservative results.
 Sequential bindings and lexical parameters can have precise targets.
 References to globals inside functions are deferred: their meaning can
 change before a call. These produce candidate definitions, with an explicit
-explanation. Unsupported control flow, queries, and dynamic operations
-produce runtime-dependent results instead of invented certainty.
+explanation. Conditional arms are analyzed separately with their lexical scope intact.
+Unknown calls and loads affect global certainty, not recognition of later
+core forms. This assumes standard core forms unless explicitly shadowed;
+dynamic rebinding of core forms is not modeled. Other unsupported control
+flow, queries, and dynamic operations produce runtime-dependent results
+instead of invented certainty.
 
 Binding navigation and value navigation are distinct. After assigning an
 alias to a function, redefining the original binding does not change the
