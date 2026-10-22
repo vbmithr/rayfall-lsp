@@ -49,6 +49,59 @@ let count = Alcotest.(check int)
 
 let tests =
   [
+    ( "imported table headers and local projection aliases",
+      fun () ->
+        with_project (fun dir file ->
+            let helper =
+              file "helper.rfl"
+                "(set bt {}) (set bt.positions (table [sym qty] (list [X] \
+                 [1])))"
+            in
+            let text =
+              "(load \"helper.rfl\") (set f (fn [] (let p (select {from: \
+               bt.positions units: qty})) (select {from: p result: units})))"
+            in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            let a = Project.analysis p in
+            let bs = targets p a "qty" in
+            count "imported header" 1 (List.length bs);
+            Alcotest.(check string)
+              "header URI" helper
+              (Lsp.Uri.to_path (Lsp.Uri.of_string (List.hd bs).location.uri));
+            Alcotest.(check bool) "column kind" true ((List.hd bs).kind = Column);
+            let bs = targets p a "units" in
+            count "alias definition" 1 (List.length bs);
+            Alcotest.(check string)
+              "alias URI"
+              (Source.uri (Analysis.source a))
+              (List.hd bs).location.uri;
+            let overlay =
+              analyze helper
+                "(set bt {}) (set bt.positions (table [sym size] (list [X] \
+                 [1])))"
+            in
+            let p = Project.create ~roots:[ dir ] ~documents:[ overlay ] a in
+            count "removed header does not stay cached" 0
+              (List.length (targets p (Project.analysis p) "qty"))) );
+    ( "global table reassignments retain candidate column origins",
+      fun () ->
+        with_project (fun dir file ->
+            let text =
+              "(set t (table [x] (list [1]))) (set f (fn [] (select {from: t \
+               result: x}))) (set t (table [x] (list [2])))"
+            in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            let a = Project.analysis p in
+            match Project.resolve p a (reference a "x") with
+            | Analysis.Candidates (bs, _) ->
+                count "both column declarations" 2 (List.length bs)
+            | _ ->
+                Alcotest.fail "call-time table mutation must remain uncertain")
+    );
     ( "query imports retain column ambiguity",
       fun () ->
         with_project (fun dir file ->

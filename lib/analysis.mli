@@ -1,4 +1,4 @@
-type binding_kind = Global | Local | Parameter
+type binding_kind = Global | Local | Parameter | Column
 type location = { uri : string; span : Source.span }
 
 type binding = {
@@ -27,7 +27,10 @@ type occurrence = {
 type load = { path : string option; span : Source.span }
 type t
 
-val analyze : Source.t -> t
+val analyze : ?imports:t list -> Source.t -> t
+(** Imported analyses contribute uncertain schema hints, never proof of runtime
+    execution order or a final global value. *)
+
 val loads : t -> load list
 val source : t -> Source.t
 val syntax : t -> Syntax.t

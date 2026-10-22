@@ -39,8 +39,19 @@ locals and parameters. Bare names without a lexical binding remain possible
 columns, even when an unrelated global exists. Qualified globals are candidate
 assignments with an explicit column-shadowing caveat. Nested queries and
 inline lambdas retain captures; query keys and output aliases are not lexical
-references. Source schemas, alias origins, joins, and control clauses remain
-future work.
+references. Literal table headers and query output labels have distinct
+column identities. Schemas flow through local aliases, sorting, projections,
+and ungrouped updates. Loaded global table declarations are schema hints;
+call-time mutation keeps their origins uncertain. After collecting the bounded
+load graph, the current document is analyzed again with these hints so imported
+headers and local query aliases can supply navigation targets. Dependencies
+are not iterated to a whole-project type-inference fixed point. Joins, arbitrary
+dynamic schemas, grouped update outputs, and control clauses remain future work.
+
+Quoted symbols stay data except in recognized reference positions. The first
+argument of the builtin `alter` names a mutation target; its operation argument
+is unevaluated data. Explicit shadowing disables that special interpretation,
+and lexical targets remain unsupported as in Rayforce.
 
 Binding navigation and value navigation are distinct. After assigning an
 alias to a function, redefining the original binding does not change the

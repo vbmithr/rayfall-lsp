@@ -109,6 +109,7 @@ let document_at params =
       ~documents:(Hashtbl.fold (fun _ a xs -> a :: xs) docs [])
       analysis
   in
+  let analysis = Project.analysis project in
   (project, analysis, Analysis.at analysis byte)
 
 let handle_request method_ params =

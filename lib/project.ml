@@ -1,6 +1,7 @@
 module Paths = Set.Make (String)
 
 type t = {
+  entry : Analysis.t;
   analyses : Analysis.t list;
   sources : (string, Source.t) Hashtbl.t;
   issues : string list;
@@ -238,8 +239,11 @@ let create ~roots ~documents entry =
                       paths)
               (Analysis.loads a)))
   done;
-  { analyses = List.rev !analyses; sources; issues = List.rev !problems }
+  let analyses = List.rev !analyses in
+  let entry = Analysis.analyze ~imports:analyses (Analysis.source entry) in
+  { entry; analyses; sources; issues = List.rev !problems }
 
+let analysis t = t.entry
 let source t uri = Hashtbl.find_opt t.sources uri
 let issues t = t.issues
 
@@ -275,6 +279,9 @@ let resolve t analysis (o : Analysis.occurrence) =
             | _ -> context )
   in
   match o.resolution with
+  | Analysis.Candidates (bs, _)
+    when List.exists (fun (b : Analysis.binding) -> b.kind = Column) bs ->
+      o.resolution
   | Analysis.Candidates (bs, _) -> candidates bs
   | Analysis.Unresolved _ -> candidates []
   | Analysis.Runtime_dependent why

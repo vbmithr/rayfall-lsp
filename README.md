@@ -35,7 +35,7 @@ scope, but their global writes are not assumed to execute. Quoted data is
 not treated as executable references.
 
 Runtime inspection, completion, references, and rename are not implemented
-yet. Query column resolution and dynamic evaluation remain runtime-dependent.
+yet. Dynamic schemas and evaluation remain runtime-dependent.
 See [the design and roadmap](docs/design.md).
 
 ## Query navigation
@@ -44,8 +44,9 @@ For a literal query dictionary, `from:` is analyzed in the surrounding
 scope. Predicates, projections, update expressions, and dictionary-form
 `by:` expressions retain lexical parameters, locals, and captures. For
 example, in `(select {from: t where: (> price cutoff)})`, a parameter named
-`cutoff` resolves to its declaration. Query labels are data, not references.
-Nested queries and inline lambdas preserve these lexical bindings.
+`cutoff` resolves to its declaration. Output labels define columns rather than
+lexical variables; control keys remain data. Nested queries and inline lambdas
+preserve lexical bindings.
 
 Rayforce lets lexical locals shadow columns; columns can shadow globals.
 Without a known source schema, a bare name such as `price` therefore stays
@@ -54,11 +55,31 @@ names such as `bt.cash0` offer known namespace and field assignments as
 candidates, with hover explaining that a column could shadow the namespace.
 A lexical namespace parameter still takes precedence.
 
-Column origins, projected aliases, join schemas, sorting/control clauses,
-and quoted in-place update/delete targets are not resolved yet. Dynamically
-constructed query dictionaries remain opaque. Ordinary dictionaries,
-vectors, and quoted symbols keep their literal-data semantics outside the
-specific query clauses above. Query output aliases do not become lexical
+Literal `(table [price qty] ...)` headers define column origins. Known schemas
+follow local aliases, `xasc`/`xdesc`, projections, and ungrouped updates. A query
+reading `price` can jump to its header. A later query reading a calculated
+alias such as `notional: (* price qty)` can jump to that output label, whose
+expression in turn links to the source columns. Dictionary-form grouping
+labels also define output columns. Lexical parameters still take precedence.
+
+Loaded literal table declarations enrich the current document's analysis.
+Global table assignments, including alternative assignments, contribute
+candidate column origins rather than guaranteed runtime schemas. Unsaved
+dependency edits refresh those origins. This is bounded structural inference,
+not execution or a complete type checker: arbitrary cross-file computations,
+joins, dynamic constructors, grouped update results, sorting/control clauses,
+and quoted in-place update/delete targets remain unsupported.
+
+Quoted symbols normally remain data. The first argument to the builtin
+`alter` is an exception: `(alter 'bt.qty set i value)` references a mutation
+target, so `bt` and `qty` support definition navigation there. The unevaluated
+operation name and ordinary quoted symbols remain data. Lexical alter targets
+are marked unsupported, matching Rayforce's restriction on local mutation.
+A shadowed function named `alter` keeps ordinary function-call semantics.
+
+Dynamically constructed query dictionaries remain opaque. Ordinary
+dictionaries and vectors keep their literal-data semantics outside recognized
+constructors and query clauses. Query output aliases do not become lexical
 bindings outside the query.
 
 ## Cross-file navigation

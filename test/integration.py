@@ -133,3 +133,47 @@ with tempfile.TemporaryDirectory(prefix="rayfall entrypoint ") as directory:
     assert replies[10]["result"] == [], replies[10]
     assert "shadowed by a query column" in replies[11]["result"]["contents"]["value"], replies[11]
 print("PASS: configured entrypoint LSP navigation, unsaved runner, close, dotted names, queries")
+
+with tempfile.TemporaryDirectory(prefix="rayfall columns ") as directory:
+    root = Path(directory)
+    helper = root / "tables.rfl"
+    header = '(set bt {})\n(set bt.positions (table [sym qty] (list [X] [1])))\n(set bt.qty [1])'
+    helper.write_text(header)
+    main = root / "report.rfl"
+    source = '(load "tables.rfl")\n(set report (fn []\n  (let p (select {from: bt.positions units: qty}))\n  (select {from: p total: (sum units)})))\n(alter \'bt.qty set 0 2)'
+    uri = main.as_uri()
+    def query(identifier, line, token, offset=0, method="textDocument/definition"):
+        return {"jsonrpc": "2.0", "id": identifier, "method": method,
+                "params": {"textDocument": {"uri": uri}, "position": {"line": line, "character": source.splitlines()[line].index(token) + offset}}}
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": root.as_uri()}},
+        notification("initialized", {}),
+        notification("textDocument/didOpen", {"textDocument": {"uri": uri, "version": 1, "languageId": "rayfall", "text": source}}),
+        query(2, 2, "qty"),
+        query(3, 3, "units"),
+        query(4, 4, "bt.qty"),
+        query(5, 4, "bt.qty", 3),
+        query(6, 4, "set"),
+        query(7, 3, "units", method="textDocument/hover"),
+        notification("textDocument/didOpen", {"textDocument": {"uri": helper.as_uri(), "version": 1, "languageId": "rayfall", "text": header.replace("[sym qty]", "[sym size]")}}),
+        query(8, 2, "qty"),
+        notification("textDocument/didClose", {"textDocument": {"uri": helper.as_uri()}}),
+        query(9, 2, "qty"),
+        {"jsonrpc": "2.0", "id": 10, "method": "shutdown"},
+        notification("exit", {}),
+    ]
+    replies = run(messages)
+    for identifier in [2, 9]:
+        result = replies[identifier]["result"]
+        assert len(result) == 1 and result[0]["uri"] == helper.as_uri(), result
+        assert result[0]["range"]["start"] == {"line": 1, "character": header.splitlines()[1].index("qty]")}, result
+    result = replies[3]["result"]
+    assert len(result) == 1 and result[0]["uri"] == uri, result
+    assert result[0]["range"]["start"] == {"line": 2, "character": source.splitlines()[2].index("units:")}, result
+    for identifier, line in [(4, 0), (5, 2)]:
+        result = replies[identifier]["result"]
+        assert len(result) == 1 and result[0]["uri"] == helper.as_uri(), result
+        assert result[0]["range"]["start"] == {"line": line, "character": 5}, result
+    assert replies[6]["result"] == [] and replies[8]["result"] == []
+    assert replies[7]["result"]["contents"]["value"] == "Column: units"
+print("PASS: imported column headers, aliases, alter symbols, dependency schema edits")

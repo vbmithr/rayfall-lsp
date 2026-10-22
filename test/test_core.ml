@@ -22,6 +22,90 @@ let check_int = Alcotest.(check int)
 
 let tests =
   [
+    ( "literal table columns and calculated aliases",
+      fun () ->
+        let s =
+          "(set t (table [price qty] (list [10] [2]))) (set q (select {from: t \
+           notional: (* price qty)})) (select {from: q value: notional})"
+        in
+        let a = analyze s in
+        check_int "source column"
+          (find s "[price" + 1)
+          (target a (find s "price qty)")).location.span.start_byte;
+        check_int "calculated alias" (find s "notional:")
+          (target a (find s "value: notional" + 7)).location.span.start_byte );
+    ( "update preserves columns and replaces field origins",
+      fun () ->
+        let s =
+          "(set t (table [x y] (list [1] [2]))) (set u (update {from: t x: (+ \
+           x 1)})) (select {from: u a: x b: y})"
+        in
+        let a = analyze s in
+        check_int "update expression reads original"
+          (find s "[x y]" + 1)
+          (target a (find s "x 1")).location.span.start_byte;
+        check_int "updated origin" (find s "x:")
+          (target a (find s "a: x" + 3)).location.span.start_byte;
+        check_int "preserved origin" (find s "y]")
+          (target a (find s "b: y" + 3)).location.span.start_byte );
+    ( "local table schema survives sorting and aliases",
+      fun () ->
+        let s =
+          "(set f (fn [] (let t (table [x] (list [1]))) (let sorted (xasc t \
+           'x)) (let alias sorted) (select {from: alias value: x})))"
+        in
+        let a = analyze s in
+        check_int "column through aliases"
+          (find s "[x]" + 1)
+          (target a (find s "value: x" + 7)).location.span.start_byte );
+    ( "lexical parameter shadows a known source column",
+      fun () ->
+        let s =
+          "(set f (fn [x] (let t (table [x] (list [1]))) (select {from: t \
+           value: x})))"
+        in
+        let a = analyze s in
+        check_int "parameter wins"
+          (find s "[x]" + 1)
+          (target a (find s "value: x" + 7)).location.span.start_byte );
+    ( "known absent column falls back to global",
+      fun () ->
+        let s =
+          "(set cutoff 3) (set t (table [price] (list [10]))) (select {from: t \
+           where: (> price cutoff)})"
+        in
+        let a = analyze s in
+        check_int "global cutoff" (find s "cutoff 3")
+          (target a (find s "cutoff)")).location.span.start_byte );
+    ( "alter quoted target is a reference but op and other symbols are data",
+      fun () ->
+        let s =
+          "(set bt {}) (set bt.qty [1]) (alter 'bt.qty set 0 2) 'bt.qty"
+        in
+        let a = analyze s in
+        let byte = find s "'bt.qty set" + 1 in
+        check_int "alter namespace" (find s "bt {}")
+          (target a byte).location.span.start_byte;
+        check_int "alter field" (find s "bt.qty [")
+          (target a (byte + 3)).location.span.start_byte;
+        Alcotest.(check bool)
+          "op is data" true
+          (Analysis.at a (find s "set 0") = None);
+        Alcotest.(check bool)
+          "ordinary quoted symbol is data" true
+          (Analysis.at a (String.length s - 4) = None) );
+    ( "alter rejects lexical targets and respects shadowed builtin",
+      fun () ->
+        let s = "(set f (fn [x] (alter 'x set 0 1)))" in
+        let a = analyze s in
+        check_int "no lexical mutation target" 0
+          (List.length
+             (Analysis.targets (occurrence a (find s "'x")).resolution));
+        let s = "(set f (fn [alter] (alter 'x set 0 1)))" in
+        let a = analyze s in
+        Alcotest.(check bool)
+          "shadowed alter keeps quoted data" true
+          (Analysis.at a (find s "'x") = None) );
     ( "select keeps lexical variables ahead of unknown columns",
       fun () ->
         let s =
@@ -64,8 +148,8 @@ let tests =
         check_int "group parameter" (find s "offset]")
           (target a (find s "offset)")).location.span.start_byte;
         Alcotest.(check bool)
-          "group label is data" true
-          (Analysis.at a (find s "group:") = None) );
+          "group label defines a column" true
+          ((target a (find s "group:")).kind = Analysis.Column) );
     ( "nested queries and lambda expressions keep captures",
       fun () ->
         let s =

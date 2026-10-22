@@ -3,6 +3,10 @@ type t
     Open editor documents override disk content. No Rayfall is evaluated. *)
 
 val create : roots:string list -> documents:Analysis.t list -> Analysis.t -> t
+
+val analysis : t -> Analysis.t
+(** The current document enriched with column origins from dependencies. *)
+
 val source : t -> string -> Source.t option
 val resolve : t -> Analysis.t -> Analysis.occurrence -> Analysis.resolution
 val issues : t -> string list
