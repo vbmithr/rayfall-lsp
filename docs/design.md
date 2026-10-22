@@ -30,8 +30,17 @@ explanation. Conditional arms are analyzed separately with their lexical scope i
 Unknown calls and loads affect global certainty, not recognition of later
 core forms. This assumes standard core forms unless explicitly shadowed;
 dynamic rebinding of core forms is not modeled. Other unsupported control
-flow, queries, and dynamic operations produce runtime-dependent results
-instead of invented certainty.
+flow and dynamic operations produce runtime-dependent results instead of
+invented certainty.
+
+Literal query dictionaries have a separate expression context. Their source
+expression uses the surrounding scope; row expressions preserve lexical
+locals and parameters. Bare names without a lexical binding remain possible
+columns, even when an unrelated global exists. Qualified globals are candidate
+assignments with an explicit column-shadowing caveat. Nested queries and
+inline lambdas retain captures; query keys and output aliases are not lexical
+references. Source schemas, alias origins, joins, and control clauses remain
+future work.
 
 Binding navigation and value navigation are distinct. After assigning an
 alias to a function, redefining the original binding does not change the

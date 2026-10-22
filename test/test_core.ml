@@ -22,6 +22,88 @@ let check_int = Alcotest.(check int)
 
 let tests =
   [
+    ( "select keeps lexical variables ahead of unknown columns",
+      fun () ->
+        let s =
+          "(set f (fn [t x] (let threshold 3) (select {from: t where: (> x \
+           threshold) answer: x})))"
+        in
+        let a = analyze s in
+        check_int "source parameter"
+          (find s "[t x]" + 1)
+          (target a (find s "t where:")).location.span.start_byte;
+        check_int "where parameter" (find s "x]")
+          (target a (find s "x threshold")).location.span.start_byte;
+        check_int "where local" (find s "threshold 3")
+          (target a (find s "threshold)")).location.span.start_byte;
+        check_int "projection parameter" (find s "x]")
+          (target a (find s "answer: x" + 8)).location.span.start_byte );
+    ( "update and delete keep lexical predicates",
+      fun () ->
+        List.iter
+          (fun verb ->
+            let s =
+              "(set f (fn [t cutoff] (" ^ verb
+              ^ " {from: t where: (> price cutoff)})))"
+            in
+            let a = analyze s in
+            check_int "predicate parameter" (find s "cutoff]")
+              (target a (find s "cutoff)")).location.span.start_byte;
+            check_int "unknown column is not a global" 0
+              (List.length
+                 (Analysis.targets
+                    (occurrence a (find s "price cutoff")).resolution)))
+          [ "update"; "delete" ] );
+    ( "grouping expressions retain locals without treating labels as references",
+      fun () ->
+        let s =
+          "(set f (fn [t offset] (select {from: t by: {group: (+ bucket \
+           offset)} count: (count bucket)})))"
+        in
+        let a = analyze s in
+        check_int "group parameter" (find s "offset]")
+          (target a (find s "offset)")).location.span.start_byte;
+        Alcotest.(check bool)
+          "group label is data" true
+          (Analysis.at a (find s "group:") = None) );
+    ( "nested queries and lambda expressions keep captures",
+      fun () ->
+        let s =
+          "(set f (fn [t limit] (select {from: (select {from: t where: (> x \
+           limit)}) result: (map (fn [v] (+ v limit)) x)})))"
+        in
+        let a = analyze s in
+        check_int "nested predicate" (find s "limit]")
+          (target a (find s "limit)")).location.span.start_byte;
+        check_int "query lambda capture" (find s "limit]")
+          (target a (find s "v limit" + 2)).location.span.start_byte;
+        check_int "query lambda parameter"
+          (find s "[v]" + 1)
+          (target a (find s "v limit")).location.span.start_byte );
+    ( "qualified query globals remain candidates",
+      fun () ->
+        let s =
+          "(set bt {}) (set bt.cash0 42) (select {from: table result: (+ cash0 \
+           bt.cash0)})"
+        in
+        let a = analyze s in
+        let byte = find s "bt.cash0)" in
+        List.iter
+          (fun byte ->
+            match (occurrence a byte).resolution with
+            | Analysis.Candidates ([ _ ], why) ->
+                Alcotest.(check bool)
+                  "explain column uncertainty" true
+                  (String.starts_with ~prefix:"global lookup may be shadowed"
+                     why)
+            | _ -> Alcotest.fail "query global must be a candidate")
+          [ byte; byte + 3 ] );
+    ( "query aliases do not leak into lexical scope",
+      fun () ->
+        let s = "(set x 1) (select {from: t x: 2}) x" in
+        let a = analyze s in
+        check_int "original global" (find s "x 1")
+          (target a (String.length s - 1)).location.span.start_byte );
     ( "dotted assignment separates namespace reference and field declaration",
       fun () ->
         let s = "(set bt {}) (set bt.buy_policy 'REJECT)" in

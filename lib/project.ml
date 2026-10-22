@@ -262,9 +262,17 @@ let resolve t analysis (o : Analysis.occurrence) =
     | bs ->
         Analysis.Candidates
           ( bs,
-            "assignments in this document, configured entrypoints, and \
-             literal-load dependencies; runtime execution order is not proven"
-          )
+            let context =
+              "assignments in this document, configured entrypoints, and \
+               literal-load dependencies; runtime execution order is not \
+               proven"
+            in
+            match o.resolution with
+            | (Analysis.Candidates (_, why) | Analysis.Runtime_dependent why)
+              when String.starts_with ~prefix:"global lookup may be shadowed"
+                     why ->
+                why ^ "; " ^ context
+            | _ -> context )
   in
   match o.resolution with
   | Analysis.Candidates (bs, _) -> candidates bs

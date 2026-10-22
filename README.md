@@ -18,8 +18,10 @@ It analyzes source without executing your program or starting Rayforce.
   on `cash0`, find known assignments to that qualified field. This also
   applies to assignment targets: in `(set bt.cash0 ...)`, `bt` is a namespace
   reference and `cash0` is the field declaration, which resolves to itself.
-  A lexical
-  parameter named `bt` takes precedence over an unrelated global namespace.
+  A lexical parameter named `bt` takes precedence over an unrelated global
+  namespace.
+- Parameters and locals inside `select`, `update`, and `delete` expressions,
+  plus candidate definitions for qualified globals inside queries.
 - Syntax diagnostics, incomplete source, and UTF-16 editor positions.
 
 Function bodies can run after globals change. Global references inside them
@@ -35,6 +37,29 @@ not treated as executable references.
 Runtime inspection, completion, references, and rename are not implemented
 yet. Query column resolution and dynamic evaluation remain runtime-dependent.
 See [the design and roadmap](docs/design.md).
+
+## Query navigation
+
+For a literal query dictionary, `from:` is analyzed in the surrounding
+scope. Predicates, projections, update expressions, and dictionary-form
+`by:` expressions retain lexical parameters, locals, and captures. For
+example, in `(select {from: t where: (> price cutoff)})`, a parameter named
+`cutoff` resolves to its declaration. Query labels are data, not references.
+Nested queries and inline lambdas preserve these lexical bindings.
+
+Rayforce lets lexical locals shadow columns; columns can shadow globals.
+Without a known source schema, a bare name such as `price` therefore stays
+runtime-dependent rather than jumping to an unrelated global. Qualified
+names such as `bt.cash0` offer known namespace and field assignments as
+candidates, with hover explaining that a column could shadow the namespace.
+A lexical namespace parameter still takes precedence.
+
+Column origins, projected aliases, join schemas, sorting/control clauses,
+and quoted in-place update/delete targets are not resolved yet. Dynamically
+constructed query dictionaries remain opaque. Ordinary dictionaries,
+vectors, and quoted symbols keep their literal-data semantics outside the
+specific query clauses above. Query output aliases do not become lexical
+bindings outside the query.
 
 ## Cross-file navigation
 

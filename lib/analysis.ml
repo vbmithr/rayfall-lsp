@@ -43,6 +43,7 @@ type env = {
   globals : binding Names.t;
   deferred : bool;
   opaque : bool;
+  query : bool;
 }
 
 let unknown = { origins = []; unknown = true }
@@ -163,6 +164,11 @@ let analyze source =
   let lookup env name =
     match local env name with
     | Some b -> (`Known (Resolved b), value b)
+    | None when env.query ->
+        ( `Known
+            (Runtime_dependent
+               "query name may be a column; source schema is unknown"),
+          unknown )
     | None when env.deferred || env.opaque -> (`Global name, unknown)
     | None -> (
         match Names.find_opt name env.globals with
@@ -186,6 +192,11 @@ let analyze source =
           ( `Known
               (Runtime_dependent "member lookup depends on the lexical value"),
             unknown )
+      | _ when env.query && List.length parts > 1 && root <> "" -> (
+          let r, v =
+            lookup { env with query = false; deferred = true } prefix
+          in
+          match r with `Global name -> (`Query_global name, v) | _ -> (r, v))
       | _ -> lookup env prefix
     in
     let emit ?span prefix =
@@ -309,9 +320,46 @@ let analyze source =
               else if special && List.mem name [ "select"; "update"; "delete" ]
               then (
                 head_ref ();
-                List.iter
-                  (fun j -> opaque j "query scopes are not implemented")
-                  args;
+                (match args with
+                | [ dict ] when (node dict).kind = "dictionary" ->
+                    List.iter
+                      (fun pair ->
+                        match children pair with
+                        | [ key_node; expr ] ->
+                            let key = text key_node in
+                            let key =
+                              if (node key_node).kind = "string" then
+                                try
+                                  match Yojson.Safe.from_string key with
+                                  | `String value -> value
+                                  | _ -> key
+                                with Yojson.Json_error _ -> key
+                              else key
+                            in
+                            if key = "from" then
+                              ignore (walk (depth + 1) env expr)
+                            else if
+                              List.mem key [ "asc"; "desc"; "take"; "nearest" ]
+                            then
+                              opaque expr
+                                "query ordering and control clauses are not \
+                                 analyzed"
+                            else if name = "delete" && key <> "where" then
+                              opaque expr
+                                "delete column names require schema analysis"
+                            else if
+                              key = "by" && (node expr).kind = "dictionary"
+                            then query_pairs (depth + 1) env expr
+                            else
+                              ignore
+                                (walk (depth + 1) { env with query = true } expr)
+                        | _ -> opaque pair "incomplete query clause")
+                      (children dict)
+                | _ ->
+                    List.iter
+                      (fun j ->
+                        opaque j "query dictionary is not statically known")
+                      args);
                 (env, unknown))
               else if special && name = "fn" then (
                 head_ref ();
@@ -385,12 +433,28 @@ let analyze source =
                 ({ env with opaque = env.opaque || not known_builtin }, unknown)
           )
       | _ -> (env, unknown)
+  and query_pairs depth env dict =
+    if depth > 256 then opaque dict "analysis nesting limit"
+    else
+      List.iter
+        (fun pair ->
+          match children pair with
+          | [ _key; expr ] ->
+              ignore (walk (depth + 1) { env with query = true } expr)
+          | _ -> opaque pair "incomplete grouping clause")
+        (children dict)
   and sequence depth env nodes =
     List.fold_left (fun (env, _) i -> walk depth env i) (env, unknown) nodes
   in
   ignore
     (walk 0
-       { locals = []; globals = Names.empty; deferred = false; opaque = false }
+       {
+         locals = [];
+         globals = Names.empty;
+         deferred = false;
+         opaque = false;
+         query = false;
+       }
        0);
   let bindings = List.rev !bindings in
   let occurrences =
@@ -399,18 +463,25 @@ let analyze source =
         let resolution =
           match r with
           | `Known r -> r
-          | `Global name ->
+          | `Global name | `Query_global name ->
+              let query = match r with `Query_global _ -> true | _ -> false in
+              let reason =
+                if query then
+                  "global lookup may be shadowed by a query column; source \
+                   schema is unknown"
+                else "global lookup depends on the call/execution context"
+              in
               let bs =
                 List.filter (fun b -> b.kind = Global && b.name = name) bindings
               in
-              if bs = [] then
-                Runtime_dependent
-                  "global lookup depends on the call/execution context"
+              if bs = [] then Runtime_dependent reason
               else
                 Candidates
                   ( bs,
-                    "global lookup depends on execution; document assignments \
-                     are possible targets" )
+                    if query then reason
+                    else
+                      "global lookup depends on execution; document \
+                       assignments are possible targets" )
         in
         {
           name;

@@ -49,6 +49,27 @@ let count = Alcotest.(check int)
 
 let tests =
   [
+    ( "query imports retain column ambiguity",
+      fun () ->
+        with_project (fun dir file ->
+            ignore (file "helper.rfl" "(set x 1) (set bt {}) (set bt.cash0 42)");
+            let text =
+              "(load \"helper.rfl\") (select {from: t result: x c: bt.cash0})"
+            in
+            let entry = file "main.rfl" text in
+            let a = analyze entry text in
+            let p = Project.create ~roots:[ dir ] ~documents:[] a in
+            count "bare column must not bind imported global" 0
+              (List.length (targets p a "x"));
+            match Project.resolve p a (reference a "bt.cash0") with
+            | Analysis.Candidates ([ _ ], why) ->
+                Alcotest.(check bool)
+                  "keep schema uncertainty" true
+                  (String.starts_with ~prefix:"global lookup may be shadowed"
+                     why)
+            | _ ->
+                Alcotest.fail "qualified field must be an uncertain candidate")
+    );
     ( "working directory and nearest config select the right file",
       fun () ->
         with_project (fun dir file ->
