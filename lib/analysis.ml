@@ -454,7 +454,8 @@ let analyze ?(imports = []) source =
             ( `Known (Unresolved ("no binding in this document for " ^ name)),
               global_value name ))
   in
-  let remember_name ?definition ?name:given_name env i =
+  let remember_name ?definition ?name:given_name ?(receiver_only = false) env i
+      =
     let name = Option.value given_name ~default:(text i) in
     let parts = String.split_on_char '.' name in
     let root = List.hd parts in
@@ -525,7 +526,7 @@ let analyze ?(imports = []) source =
             (fun (prefix, offset, _) field ->
               let prefix = prefix ^ "." ^ field and offset = offset + 1 in
               let v =
-                if field = "" then unknown
+                if field = "" || (receiver_only && prefix = name) then unknown
                 else
                   emit
                     ~span:
@@ -912,6 +913,13 @@ let analyze ?(imports = []) source =
                             },
                             v )
                       | [] -> assert false)
+                | [ label ]
+                  when (node label).kind = "identifier"
+                       && String.contains (text label) '.' ->
+                    (* Keep the receiver visible while a member assignment is
+                       being typed, without publishing a fictitious binding. *)
+                    ignore (remember_name ~receiver_only:true env label);
+                    (env, unknown)
                 | _ ->
                     List.iter (fun j -> opaque j "invalid binding form") args;
                     (env, unknown))

@@ -37,6 +37,20 @@ let tests =
         let check = Alcotest.(check (list string)) in
         check "empty suffix" [ "cash"; "period" ]
           (complete "(set cfg {cash: 1 period: 2}) cfg.|");
+        check "incomplete assignment" [ "cash"; "period" ]
+          (complete "(set cfg {cash: 1 period: 2}) (set cfg.|)");
+        check "incomplete assignment prefix" [ "cash" ]
+          (complete "(set cfg {cash: 1 period: 2}) (set cfg.ca|)");
+        check "incomplete assignment shadowing" []
+          (complete "(set cfg {cash: 1}) (set f (fn [cfg] (set cfg.|)))");
+        let unfinished = analyze "(set cfg {cash: 1}) (set cfg.cash)" in
+        check_int "no fictitious binding" 1
+          (List.length (Analysis.bindings unfinished));
+        Alcotest.(check bool)
+          "no target field reference" false
+          (List.exists
+             (fun (o : Analysis.occurrence) -> o.name = "cfg.cash")
+             (Analysis.occurrences unfinished));
         check "prefix" [ "cash" ]
           (complete "(set cfg {cash: 1 period: 2}) cfg.ca|sh");
         check "literal key" [ "cash" ]

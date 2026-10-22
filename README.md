@@ -274,7 +274,9 @@ The server implements standard LSP field completion for dotted receivers
 such as `bt.` and literal quoted keys of builtin `at`. It reuses dictionary,
 namespace, and table shapes already available to hover, preserving candidate
 labels for uncertain shapes. Suggestions replace only the field token and
-respect lexical shadowing. Comments, strings, quoted data, unknown receivers,
+respect lexical shadowing. Incomplete assignment targets such as `(set bt.)`
+retain the receiver shape without declaring a new binding. Comments, strings,
+quoted data, unknown receivers,
 and shadowed `at` calls do not borrow fields from unrelated global values.
 Dictionary callback parameter inference and nested dictionary value types
 remain unsupported: a callback parameter such as `ctx` may have no fields.
