@@ -506,7 +506,11 @@ let analyze ?(imports = []) source =
     in
     match parts with
     | root :: (_ :: _ as fields)
-      when root <> "" && List.for_all (( <> ) "") fields ->
+      when root <> ""
+           && List.for_all (( <> ) "")
+                (if List.hd (List.rev fields) = "" then
+                   List.rev (List.tl (List.rev fields))
+                 else fields) ->
         let start = (node i).span.end_byte - String.length name in
         ignore
           (emit
@@ -521,13 +525,15 @@ let analyze ?(imports = []) source =
             (fun (prefix, offset, _) field ->
               let prefix = prefix ^ "." ^ field and offset = offset + 1 in
               let v =
-                emit
-                  ~span:
-                    {
-                      Source.start_byte = start + offset;
-                      end_byte = start + offset + String.length field;
-                    }
-                  prefix
+                if field = "" then unknown
+                else
+                  emit
+                    ~span:
+                      {
+                        Source.start_byte = start + offset;
+                        end_byte = start + offset + String.length field;
+                      }
+                    prefix
               in
               (prefix, offset + String.length field, v))
             (root, String.length root, unknown)
@@ -910,7 +916,12 @@ let analyze ?(imports = []) source =
                     List.iter (fun j -> opaque j "invalid binding form") args;
                     (env, unknown))
               else
-                let env, fn = walk (depth + 1) env head in
+                let env, fn =
+                  if special && name = "at" then (
+                    head_ref ();
+                    (env, unknown))
+                  else walk (depth + 1) env head
+                in
                 let env, actuals =
                   List.fold_left
                     (fun (env, actuals) arg ->

@@ -34,8 +34,8 @@ rebinding of core forms is not modeled. Conditional arms retain lexical
 scope, but their global writes are not assumed to execute. Quoted data is
 not treated as executable references.
 
-Runtime inspection, completion, and rename are not implemented
-yet. Dynamic schemas and evaluation remain runtime-dependent.
+Runtime inspection and rename are not implemented yet. Field completion
+uses known static shapes. Dynamic schemas and evaluation remain runtime-dependent.
 See [the design and roadmap](docs/design.md).
 
 ## Structure hover
@@ -263,10 +263,23 @@ It is inspection, so selecting text cannot insert it as a completion.
 Use `C-u C-c C-d` for a help window containing the full details. Without
 `posframe` or a graphical display, inspection falls back to that help window.
 Replies received after moving point or editing the buffer are discarded.
-`M-TAB` or `M-x company-complete` requests completion through your existing
-completion providers. This does not add LSP field completion or dictionary
-parameter inference: a callback parameter such as `ctx` may still have no
-known fields. Other modes retain their existing settings.
+Typing `.` starts a Company field-completion menu automatically. It does not
+insert a candidate until you accept one. Other idle completion remains off.
+`M-TAB` opens the menu without inserting text, including with one remaining
+candidate. It works after moving point into existing code, including
+inside `(at cfg 'ca)` after the quoted key prefix. Company must be enabled.
+Other modes retain their existing settings.
+
+The server implements standard LSP field completion for dotted receivers
+such as `bt.` and literal quoted keys of builtin `at`. It reuses dictionary,
+namespace, and table shapes already available to hover, preserving candidate
+labels for uncertain shapes. Suggestions replace only the field token and
+respect lexical shadowing. Comments, strings, quoted data, unknown receivers,
+and shadowed `at` calls do not borrow fields from unrelated global values.
+Dictionary callback parameter inference and nested dictionary value types
+remain unsupported: a callback parameter such as `ctx` may have no fields.
+Only `.` triggers the Emacs helper automatically; quoted-key completion is
+manual. Other LSP clients can use the advertised `.` and quote triggers.
 
 Ensure `rayfall-lsp` is on Emacs's `exec-path`. Use `M-.` for definitions;
 hover information is available through Eglot/ElDoc. Other LSP clients can

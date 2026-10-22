@@ -149,6 +149,9 @@ let handle_request method_ params =
               ("definitionProvider", `Bool true);
               ("referencesProvider", `Bool true);
               ("hoverProvider", `Bool true);
+              ( "completionProvider",
+                obj [ ("triggerCharacters", `List [ string "."; string "'" ]) ]
+              );
             ] );
       ])
   else if not !initialized then
@@ -161,6 +164,38 @@ let handle_request method_ params =
   else if !stopped then invalid_arg "Server has shut down"
   else
     match method_ with
+    | "textDocument/completion" ->
+        let _, a, _ = document_at params in
+        let source = Analysis.source a in
+        let p = member "position" params in
+        let byte =
+          Source.offset source
+            {
+              line = int (member "line" p);
+              character = int (member "character" p);
+            }
+        in
+        `List
+          (List.map
+             (fun (item : Completion.item) ->
+               obj
+                 [
+                   ("label", string item.label);
+                   ("kind", `Int 5);
+                   ( "detail",
+                     string
+                       (if item.shape.certain then "Known field"
+                        else "Candidate field") );
+                   ( "documentation",
+                     string (Analysis.describe_structure item.shape) );
+                   ( "textEdit",
+                     obj
+                       [
+                         ("range", Source.range_json source item.span);
+                         ("newText", string item.label);
+                       ] );
+                 ])
+             (Completion.fields a byte))
     | "textDocument/definition" ->
         let project, a, o = document_at params in
         `List

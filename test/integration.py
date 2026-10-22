@@ -299,3 +299,39 @@ q'''
     assert replies[5]["result"]["range"]["start"] == {"line": 0, "character": source.splitlines()[0].index("{")}, replies[5]
     assert "cash1, period" in replies[6]["result"]["contents"]["value"] and "cash0" not in replies[6]["result"]["contents"]["value"], replies[6]
 print("PASS: dictionary/table hover, literals, aliases, derived columns, unsaved fields")
+
+with tempfile.TemporaryDirectory(prefix="rayfall completion ") as directory:
+    root = Path(directory)
+    uri = (root / "main.rfl").as_uri()
+    (root / "fields.rfl").write_text('(set bt {}) (set bt.cash 1) (set bt.period 2)')
+    source = '''(load "fields.rfl")
+(set cfg {cash: 1 period: 2})
+bt.
+(at cfg 'ca)
+(set f (fn [bt] bt.))
+; 😀
+cfg.ca'''
+    def complete(identifier, line, character):
+        return {"jsonrpc": "2.0", "id": identifier, "method": "textDocument/completion",
+                "params": {"textDocument": {"uri": uri}, "position": {"line": line, "character": character}}}
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": root.as_uri()}},
+        notification("initialized", {}),
+        notification("textDocument/didOpen", {"textDocument": {"uri": uri, "version": 1, "languageId": "rayfall", "text": source}}),
+        complete(2, 2, 3), complete(3, 3, 11), complete(4, 4, source.splitlines()[4].index('bt.)') + 3),
+        complete(5, 6, 6),
+        notification("textDocument/didChange", {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": source.replace('cash:', 'capital:')}]}),
+        complete(6, 6, 6),
+        {"jsonrpc": "2.0", "id": 7, "method": "shutdown"}, notification("exit", {}),
+    ]
+    replies = run(messages)
+    assert '.' in replies[1]['result']['capabilities']['completionProvider']['triggerCharacters']
+    assert [item['label'] for item in replies[2]['result']] == ['cash', 'period'], replies[2]
+    assert all(item['detail'] == 'Candidate field' for item in replies[2]['result']), replies[2]
+    for identifier, line, start, end in [(2, 2, 3, 3), (3, 3, 9, 11), (5, 6, 4, 6)]:
+        item = replies[identifier]['result'][0]
+        assert item['textEdit']['range'] == {'start': {'line': line, 'character': start}, 'end': {'line': line, 'character': end}}, item
+        assert item['textEdit']['newText'] == 'cash', item
+    assert replies[4]['result'] == [], replies[4]
+    assert [item['label'] for item in replies[6]['result']] == ['capital'], replies[6]
+print("PASS: field completion, imported namespaces, suffix edits, quoted keys, shadowing, unsaved changes")

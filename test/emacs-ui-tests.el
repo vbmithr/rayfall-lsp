@@ -1,6 +1,7 @@
 ;;; emacs-ui-tests.el --- Inspection checks -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'eglot)
+(defvar company-mode)
 (load-file (expand-file-name "../editors/emacs/rayfall-lsp-ui.el"
                              (file-name-directory load-file-name)))
 (ert-deftest inspection-discards-stale-replies ()
@@ -35,4 +36,19 @@
       (should (memq #'rayfall-lsp-hide-inspection pre-command-hook))
       (rayfall-lsp-hide-inspection)
       (should-not (memq #'rayfall-lsp-hide-inspection pre-command-hook)))))
+(ert-deftest field-completion-only-triggers-after-code-dot ()
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (let ((company-mode t) (calls 0))
+      (cl-letf (((symbol-function 'eglot-managed-p) (lambda () t))
+                ((symbol-function 'rayfall-lsp-complete)
+                 (lambda () (setq calls (1+ calls)))))
+        (insert "bt.")
+        (let ((last-command-event ?.)) (rayfall-lsp-complete-after-dot))
+        (should (= calls 1))
+        (let ((last-command-event ?a)) (rayfall-lsp-complete-after-dot))
+        (should (= calls 1))
+        (insert "\n; bt.")
+        (let ((last-command-event ?.)) (rayfall-lsp-complete-after-dot))
+        (should (= calls 1))))))
 (ert-run-tests-batch-and-exit)

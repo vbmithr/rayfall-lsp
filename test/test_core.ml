@@ -22,6 +22,34 @@ let check_int = Alcotest.(check int)
 
 let tests =
   [
+    ( "field completion respects syntax and scope",
+      fun () ->
+        let complete text =
+          let byte = find text "|" in
+          let text =
+            String.sub text 0 byte
+            ^ String.sub text (byte + 1) (String.length text - byte - 1)
+          in
+          List.map
+            (fun (i : Completion.item) -> i.label)
+            (Completion.fields (analyze text) byte)
+        in
+        let check = Alcotest.(check (list string)) in
+        check "empty suffix" [ "cash"; "period" ]
+          (complete "(set cfg {cash: 1 period: 2}) cfg.|");
+        check "prefix" [ "cash" ]
+          (complete "(set cfg {cash: 1 period: 2}) cfg.ca|sh");
+        check "literal key" [ "cash" ]
+          (complete "(set cfg {cash: 1 period: 2}) (at cfg 'ca|)");
+        check "bare quote" [ "cash" ]
+          (complete "(set cfg {cash: 1}) (at cfg '|)");
+        check "shadowed parameter" []
+          (complete "(set cfg {cash: 1}) (set f (fn [cfg] cfg.|))");
+        check "shadowed at" []
+          (complete "(set cfg {cash: 1}) (set f (fn [at] (at cfg 'c|)))");
+        check "literal data" [] (complete "(set cfg {cash: 1}) 'cfg.c|");
+        check "comment" [] (complete "(set cfg {cash: 1}) ; cfg.c|");
+        check "unknown" [] (complete "missing.|") );
     ( "long structure hover stays bounded",
       fun () ->
         let fields = List.init 80 (fun i -> "f" ^ string_of_int i ^ ": 0") in

@@ -107,7 +107,11 @@ bounded load graph. Definite and possible matches remain separate in the core
 API; standard LSP exposes definite matches and rejects ambiguous targets.
 This is not an exhaustive workspace index and is not sufficient for rename.
 
-Next, extend reference coverage and add completion using those identities.
+Field completion now reuses the existing static shapes for dotted receivers
+and literal keys of builtin `at`, with suffix-only edits and lexical shadowing.
+The optional Emacs helper starts Company after a typed dot; inspection stays
+on demand. Next, extend reference coverage and completion to additional
+proven value shapes.
 Bounded argument/return summaries now trace known table schemas through
 observed calls, including the backtester runner and reporting helpers.
 Two project-wide summary passes and one current-document pass exchange

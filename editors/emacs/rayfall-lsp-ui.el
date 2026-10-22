@@ -4,8 +4,8 @@
 ;; Package-Requires: ((emacs "29.1"))
 
 ;;; Commentary:
-;; Load this file to keep Rayfall Eglot inspection and Company completion
-;; on demand.  C-c C-d requests a read-only inspection popup; M-TAB still requests completion.
+;; C-c C-d requests a read-only inspection popup.  A typed dot starts
+;; Company field completion; M-TAB requests other completions manually.
 
 ;;; Code:
 (require 'eglot)
@@ -54,12 +54,44 @@ Fall back to a help window when posframe or graphical display is unavailable."
              (message "No static information at point")
            (rayfall-lsp--display-inspection documentation windowp)))))))
 
+(defun rayfall-lsp-complete ()
+  "Show completion candidates without immediately inserting a candidate."
+  (interactive)
+  (if (and (require 'company nil t) (bound-and-true-p company-mode))
+      (progn
+        (setq-local company-frontends
+                    (mapcar (lambda (frontend)
+                              (pcase frontend
+                                ('company-childframe-unless-just-one-frontend
+                                 'company-childframe-frontend)
+                                ('company-pseudo-tooltip-unless-just-one-frontend
+                                 'company-pseudo-tooltip-frontend)
+                                (_ frontend)))
+                            company-frontends))
+        (let ((company-backends '(company-capf)))
+          (company-manual-begin)))
+    (completion-at-point)))
+
+(defun rayfall-lsp-complete-after-dot ()
+  "Start Company field completion after a typed dot, without inserting text."
+  (when (and (eq last-command-event ?.)
+             (bound-and-true-p company-mode)
+             (eglot-managed-p)
+             (not (nth 8 (syntax-ppss)))
+             (save-excursion
+               (backward-char)
+               (and (> (point) (point-min))
+                    (not (memq (char-before) '(?\s ?\t ?\n ?\())))))
+    (rayfall-lsp-complete)))
+
 (defun rayfall-lsp-on-demand-setup ()
-  "Disable automatic semantic requests in Eglot-managed Rayfall buffers."
+  "Use explicit inspection and dot-triggered completion in Rayfall buffers."
   (when (and (derived-mode-p 'rayfall-mode) (eglot-managed-p))
     ;; Turning off the timer avoids requests, rather than hiding their output.
     (eldoc-mode -1)
     (setq-local company-idle-delay nil)
+    (add-hook 'post-self-insert-hook #'rayfall-lsp-complete-after-dot nil t)
+    (local-set-key (kbd "M-TAB") #'rayfall-lsp-complete)
     (local-set-key (kbd "C-c C-d") #'rayfall-lsp-describe-at-point)))
 
 (add-hook 'eglot-managed-mode-hook #'rayfall-lsp-on-demand-setup)
