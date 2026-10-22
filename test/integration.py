@@ -268,3 +268,34 @@ with tempfile.TemporaryDirectory(prefix="rayfall argument schemas ") as director
     assert replies[4]["result"] == [], replies[4]
     assert "observed call sites" in replies[3]["result"]["contents"]["value"], replies[3]
 print("PASS: return-to-argument schema hints, unknown callers, unsaved caller invalidation")
+
+with tempfile.TemporaryDirectory(prefix="rayfall shape hover ") as directory:
+    root = Path(directory)
+    uri = (root / "shapes.rfl").as_uri()
+    source = '''(set cfg {cash0: 100 period: 1D})
+(set alias cfg)
+(set t (table [sym qty] (list [X] [1])))
+(set q (select {from: t amount: qty}))
+alias
+t
+q'''
+    messages = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": root.as_uri()}},
+        notification("initialized", {}),
+        notification("textDocument/didOpen", {"textDocument": {"uri": uri, "version": 1, "languageId": "rayfall", "text": source}}),
+        query(2, 4, "alias", method="textDocument/hover"),
+        query(3, 5, "t", method="textDocument/hover"),
+        query(4, 6, "q", method="textDocument/hover"),
+        query(5, 0, "{", method="textDocument/hover"),
+        notification("textDocument/didChange", {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": source.replace("cash0:", "cash1:")}]}),
+        query(6, 4, "alias", method="textDocument/hover"),
+        {"jsonrpc": "2.0", "id": 7, "method": "shutdown"}, notification("exit", {}),
+    ]
+    replies = run(messages)
+    assert "Dictionary fields (known): cash0, period" in replies[2]["result"]["contents"]["value"], replies[2]
+    assert "Table fields (known): qty, sym" in replies[3]["result"]["contents"]["value"], replies[3]
+    assert "Table fields (known): amount" in replies[4]["result"]["contents"]["value"], replies[4]
+    assert replies[5]["result"]["contents"]["value"] == "Dictionary fields (known): cash0, period", replies[5]
+    assert replies[5]["result"]["range"]["start"] == {"line": 0, "character": source.splitlines()[0].index("{")}, replies[5]
+    assert "cash1, period" in replies[6]["result"]["contents"]["value"] and "cash0" not in replies[6]["result"]["contents"]["value"], replies[6]
+print("PASS: dictionary/table hover, literals, aliases, derived columns, unsaved fields")

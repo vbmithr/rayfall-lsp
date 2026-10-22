@@ -17,6 +17,13 @@ type resolution =
   | Unresolved of string
   | Builtin of string
 
+type structure = {
+  label : string;
+  fields : string list;
+  complete : bool;
+  certain : bool;
+}
+
 type occurrence = {
   name : string;
   span : Source.span;
@@ -24,6 +31,7 @@ type occurrence = {
   resolution : resolution;
   origins : location list;
   origin_unknown : bool;
+  structure : structure option;
 }
 
 type load = { path : string option; span : Source.span }
@@ -44,12 +52,15 @@ type t = {
   functions : (string * location list) list;
   returns : (location * schema option) list;
   calls : (location * schema option list) list;
+  dictionary_exports : (string * structure option) list;
+  structures : (Source.span * structure) list;
 }
 
 type value_info = {
   origins : location list;
   unknown : bool;
   schema : schema option;
+  dictionary : structure option;
 }
 
 type env = {
@@ -61,7 +72,39 @@ type env = {
   columns : schema option;
 }
 
-let unknown = { origins = []; unknown = true; schema = None }
+let unknown = { origins = []; unknown = true; schema = None; dictionary = None }
+
+let bounded_structure label fields complete certain =
+  let fields = List.sort_uniq String.compare fields in
+  {
+    label;
+    fields = List.filteri (fun i _ -> i < 256) fields;
+    complete = complete && List.length fields <= 256;
+    certain;
+  }
+
+let structure_of_value (value : value_info) =
+  match value.schema with
+  | Some schema ->
+      Some
+        (bounded_structure "Table"
+           (List.map fst (Names.bindings schema.columns))
+           schema.complete schema.certain)
+  | None -> value.dictionary
+
+let describe_structure (shape : structure) =
+  let qualifier =
+    match (shape.certain, shape.complete) with
+    | true, true -> "known"
+    | true, false -> "partial"
+    | false, _ -> "candidate; partial"
+  in
+  let visible = List.filteri (fun i _ -> i < 64) shape.fields in
+  Printf.sprintf "%s fields (%s): %s%s" shape.label qualifier
+    (if visible = [] then "(none known)" else String.concat ", " visible)
+    (if List.length shape.fields > 64 then
+       Printf.sprintf " … (%d more known)" (List.length shape.fields - 64)
+     else "")
 
 let builtin_names =
   [
@@ -154,8 +197,25 @@ let at t byte =
         (fun (o : occurrence) -> o.span.end_byte = byte)
         t.occurrences
 
+let structure_at t byte =
+  match at t byte with
+  | Some o -> Option.map (fun shape -> (o.span, shape)) o.structure
+  | None ->
+      List.fold_left
+        (fun best (span, shape) ->
+          if span.Source.start_byte <= byte && byte < span.end_byte then
+            match best with
+            | Some (old, _)
+              when old.Source.end_byte - old.start_byte
+                   <= span.end_byte - span.start_byte ->
+                best
+            | _ -> Some (span, shape)
+          else best)
+        None t.structures
+
 let analyze ?(imports = []) source =
   let syntax = Syntax.parse source in
+  let structures = ref [] in
   let loads = ref []
   and returns = ref []
   and calls = ref []
@@ -299,8 +359,55 @@ let analyze ?(imports = []) source =
                !returns)
          origins)
   in
+  let qualified_fields name =
+    let prefix = name ^ "." in
+    let candidates =
+      !bindings @ List.concat_map (fun a -> a.bindings) imports
+    in
+    List.filter_map
+      (fun b ->
+        if b.kind = Global && String.starts_with ~prefix b.name then
+          let tail =
+            String.sub b.name (String.length prefix)
+              (String.length b.name - String.length prefix)
+          in
+          Some (List.hd (String.split_on_char '.' tail))
+        else None)
+      candidates
+  in
+  let global_dictionary name =
+    let own =
+      List.filter_map
+        (fun b ->
+          if b.kind = Global && b.name = name then (value b).dictionary
+          else None)
+        !bindings
+    in
+    let imported =
+      List.concat_map
+        (fun a ->
+          List.filter_map
+            (fun (n, shape) -> if n = name then shape else None)
+            a.dictionary_exports)
+        imports
+    in
+    let qualified = qualified_fields name in
+    if own = [] && imported = [] && qualified = [] then None
+    else
+      Some
+        (bounded_structure "Dictionary/namespace"
+           (qualified
+           @ List.concat_map (fun (s : structure) -> s.fields) (own @ imported)
+           )
+           false false)
+  in
   let global_value name =
-    { unknown with schema = global_schema name; origins = global_origins name }
+    {
+      unknown with
+      schema = global_schema name;
+      origins = global_origins name;
+      dictionary = global_dictionary name;
+    }
   in
   let rec lookup env name =
     match local env name with
@@ -333,7 +440,14 @@ let analyze ?(imports = []) source =
     | None when env.deferred || env.opaque -> (`Global name, global_value name)
     | None -> (
         match Names.find_opt name env.globals with
-        | Some b -> (`Known (Resolved b), value b)
+        | Some b ->
+            let v = value b in
+            let v =
+              if qualified_fields name <> [] then
+                { v with dictionary = global_dictionary name }
+              else v
+            in
+            (`Known (Resolved b), v)
         | None when List.mem name builtin_names ->
             (`Known (Builtin name), unknown)
         | None ->
@@ -447,7 +561,23 @@ let analyze ?(imports = []) source =
           | _ -> pending := List.rev_append (children i) !pending)
     done
   in
+  let decode_key i =
+    if (node i).kind = "string" then
+      try
+        match Yojson.Safe.from_string (text i) with
+        | `String s -> s
+        | _ -> text i
+      with Yojson.Json_error _ -> text i
+    else text i
+  in
   let rec walk depth env i =
+    let env, value = walk_node depth env i in
+    if List.mem (node i).kind [ "dictionary"; "call"; "identifier" ] then
+      Option.iter
+        (fun shape -> structures := ((node i).span, shape) :: !structures)
+        (structure_of_value value);
+    (env, value)
+  and walk_node depth env i =
     if depth > 256 then (
       opaque i "analysis nesting limit";
       (env, unknown))
@@ -455,8 +585,26 @@ let analyze ?(imports = []) source =
       match (node i).kind with
       | "identifier" -> (env, remember_name env i)
       | "source_file" -> sequence depth env (children i)
-      | "dictionary" | "vector" | "quoted_symbol" | "string" | "comment" ->
-          (env, unknown)
+      | "dictionary" ->
+          let pairs = children i in
+          let keys =
+            List.filter_map
+              (fun pair ->
+                match children pair with
+                | [ key; _ ] -> Some (decode_key key)
+                | _ -> None)
+              pairs
+          in
+          ( env,
+            {
+              unknown with
+              dictionary =
+                Some
+                  (bounded_structure "Dictionary" keys
+                     (List.length keys = List.length pairs)
+                     true);
+            } )
+      | "vector" | "quoted_symbol" | "string" | "comment" -> (env, unknown)
       | "ERROR" ->
           opaque i "incomplete syntax";
           (env, unknown)
@@ -512,6 +660,23 @@ let analyze ?(imports = []) source =
               then (
                 head_ref ();
                 query depth env name args)
+              else if special && name = "dict" then (
+                head_ref ();
+                let env, _ = sequence (depth + 1) env args in
+                let dictionary =
+                  match args with
+                  | [ keys; _ ]
+                    when (node keys).kind = "vector"
+                         && List.for_all
+                              (fun j -> (node j).kind = "identifier")
+                              (children keys) ->
+                      Some
+                        (bounded_structure "Dictionary"
+                           (List.map text (children keys))
+                           true true)
+                  | _ -> None
+                in
+                (env, { unknown with dictionary }))
               else if special && name = "table" then (
                 head_ref ();
                 let env, _ = sequence (depth + 1) env args in
@@ -705,6 +870,7 @@ let analyze ?(imports = []) source =
                           [ { uri = Source.uri source; span = (node i).span } ];
                         unknown = false;
                         schema = None;
+                        dictionary = None;
                       } )
                 | _ ->
                     opaque i "incomplete function parameters";
@@ -956,6 +1122,7 @@ let analyze ?(imports = []) source =
           resolution;
           origins = v.origins;
           origin_unknown = v.unknown;
+          structure = structure_of_value v;
         })
       !pending
   in
@@ -983,4 +1150,10 @@ let analyze ?(imports = []) source =
     functions;
     returns = List.rev !returns;
     calls = List.rev !calls;
+    dictionary_exports =
+      List.filter_map
+        (fun b ->
+          if b.kind = Global then Some (b.name, (value b).dictionary) else None)
+        bindings;
+    structures = List.rev !structures;
   }

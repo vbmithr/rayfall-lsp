@@ -15,6 +15,13 @@ type resolution =
   | Unresolved of string
   | Builtin of string
 
+type structure = {
+  label : string;
+  fields : string list;
+  complete : bool;
+  certain : bool;
+}
+
 type occurrence = {
   name : string;
   span : Source.span;
@@ -22,6 +29,7 @@ type occurrence = {
   resolution : resolution;
   origins : location list;
   origin_unknown : bool;
+  structure : structure option;
 }
 
 type load = { path : string option; span : Source.span }
@@ -39,3 +47,5 @@ val at : t -> int -> occurrence option
 val occurrences : t -> occurrence list
 val targets : resolution -> binding list
 val describe : resolution -> string
+val structure_at : t -> int -> (Source.span * structure) option
+val describe_structure : structure -> string

@@ -38,6 +38,27 @@ Runtime inspection, completion, and rename are not implemented
 yet. Dynamic schemas and evaluation remain runtime-dependent.
 See [the design and roadmap](docs/design.md).
 
+## Structure hover
+
+Hover a binding, reference, or literal to inspect known dictionary keys and
+table columns alongside its existing binding information. Ordinary go to
+definition still jumps to the binding or column declaration. In Emacs,
+`M-x eldoc-doc-buffer` displays the full hover when the field list is too long
+for the echo area.
+
+Dictionary literals and `(dict [keys] values)` with literal symbol keys expose
+their known keys without evaluating dictionary contents. Aliases retain that
+shape. Known table constructors and query outputs expose columns, including
+table-parameter hints from observed callers. Global namespace fields such as
+`bt.cash0` also contribute candidate members when hovering `bt`.
+
+Hover distinguishes known, partial, and candidate shapes. It displays up to
+64 fields and counts additional known fields; stored summaries retain up to
+256 names. Shapes reflect static evidence, not live object inspection or a
+complete runtime schema. Dictionary parameter/return shapes, nested field
+value types, vector/list element types and lengths, and function signatures
+are not inferred by this first hover version.
+
 ## Find references
 
 Use `M-?` (`xref-find-references`) in an Eglot-managed buffer. The server

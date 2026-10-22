@@ -207,24 +207,42 @@ let handle_request method_ params =
             | Analysis.Unresolved _ | Analysis.Builtin _ -> `List []))
     | "textDocument/hover" -> (
         let project, a, o = document_at params in
-        match o with
-        | None -> `Null
-        | Some o ->
+        let position = member "position" params in
+        let byte =
+          Source.offset (Analysis.source a)
+            {
+              line = int (member "line" position);
+              character = int (member "character" position);
+            }
+        in
+        let structure = Analysis.structure_at a byte in
+        match (o, structure) with
+        | None, None -> `Null
+        | _ ->
+            let span =
+              match (o, structure) with
+              | Some o, _ -> o.span
+              | None, Some (span, _) -> span
+              | None, None -> assert false
+            in
+            let details =
+              (match o with
+                | None -> []
+                | Some o -> [ Analysis.describe (Project.resolve project a o) ])
+              @ (match structure with
+                | None -> []
+                | Some (_, shape) -> [ Analysis.describe_structure shape ])
+              @ Project.issues project
+            in
             obj
               [
                 ( "contents",
                   obj
                     [
                       ("kind", string "plaintext");
-                      ( "value",
-                        string
-                          (Analysis.describe (Project.resolve project a o)
-                          ^
-                          match Project.issues project with
-                          | [] -> ""
-                          | xs -> "\n" ^ String.concat "\n" xs) );
+                      ("value", string (String.concat "\n" details));
                     ] );
-                ("range", Source.range_json (Analysis.source a) o.span);
+                ("range", Source.range_json (Analysis.source a) span);
               ])
     | "rayfall/followValue" -> (
         let project, _a, o = document_at params in

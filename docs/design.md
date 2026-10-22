@@ -56,6 +56,14 @@ argument of the builtin `alter` names a mutation target; its operation argument
 is unevaluated data. Explicit shadowing disables that special interpretation,
 and lexical targets remain unsupported as in Rayforce.
 
+Hover now exposes bounded dictionary and table shapes alongside binding
+resolution. Literal dictionary keys, literal-key dictionary constructors,
+local aliases and inferred namespace members provide field names without
+turning dictionary data into references. Existing table-schema and argument
+hints provide column lists. Partial and candidate shapes stay explicit;
+nested value types, dictionary call summaries, vector/list lengths and
+signatures remain future work.
+
 Binding navigation and value navigation are distinct. After assigning an
 alias to a function, redefining the original binding does not change the
 function already captured by that alias. The experimental

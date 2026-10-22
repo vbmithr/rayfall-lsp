@@ -22,6 +22,63 @@ let check_int = Alcotest.(check int)
 
 let tests =
   [
+    ( "long structure hover stays bounded",
+      fun () ->
+        let fields = List.init 80 (fun i -> "f" ^ string_of_int i ^ ": 0") in
+        let s = "{" ^ String.concat " " fields ^ "}" in
+        let a = analyze s in
+        let _, shape = Option.get (Analysis.structure_at a 0) in
+        Alcotest.(check bool)
+          "remaining field count" true
+          (String.ends_with ~suffix:"(16 more known)"
+             (Analysis.describe_structure shape)) );
+    ( "dictionary hover preserves literal semantics and aliases",
+      fun () ->
+        let s =
+          "(set x 42) (set cfg {cash: x period: 1D}) (set alias cfg) alias"
+        in
+        let a = analyze s in
+        let _, shape =
+          Option.get (Analysis.structure_at a (String.length s - 3))
+        in
+        Alcotest.(check (list string))
+          "known fields" [ "cash"; "period" ] shape.fields;
+        Alcotest.(check bool)
+          "known literal" true
+          (shape.complete && shape.certain);
+        check_int "dictionary value is data" 1
+          (List.length
+             (List.filter
+                (fun (o : Analysis.occurrence) -> o.name = "x")
+                (Analysis.occurrences a))) );
+    ( "structure hover covers literals constructors and tables",
+      fun () ->
+        let a = analyze "{x: 1 y: 2}" in
+        let _, shape = Option.get (Analysis.structure_at a 0) in
+        Alcotest.(check (list string))
+          "literal fields" [ "x"; "y" ] shape.fields;
+        let s = "(set d (dict [a b] (list 1 2))) d" in
+        let a = analyze s in
+        let _, shape =
+          Option.get (Analysis.structure_at a (String.length s - 1))
+        in
+        Alcotest.(check (list string))
+          "constructor fields" [ "a"; "b" ] shape.fields;
+        let s = "(set t (table [sym qty] (list [X] [1]))) t" in
+        let a = analyze s in
+        let _, shape =
+          Option.get (Analysis.structure_at a (String.length s - 1))
+        in
+        Alcotest.(check string) "table label" "Table" shape.label;
+        Alcotest.(check (list string))
+          "table columns" [ "qty"; "sym" ] shape.fields );
+    ( "dynamic dictionary keys do not invent fields",
+      fun () ->
+        let s = "(set f (fn [keys] (let d (dict keys (list 1))) d))" in
+        let a = analyze s in
+        Alcotest.(check bool)
+          "unknown shape" true
+          (Analysis.structure_at a (find s "d))") = None) );
     ( "self join does not duplicate column origins",
       fun () ->
         let s =

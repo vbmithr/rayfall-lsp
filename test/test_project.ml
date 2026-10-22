@@ -49,6 +49,25 @@ let count = Alcotest.(check int)
 
 let tests =
   [
+    ( "imported namespaces expose candidate fields",
+      fun () ->
+        with_project (fun dir file ->
+            ignore
+              (file "helper.rfl"
+                 "(set bt {}) (set bt.cash0 1) (set bt.positions (table [sym \
+                  qty] (list [X] [1])))");
+            let text = "(load \"helper.rfl\") (set f (fn [] bt))" in
+            let entry = file "main.rfl" text in
+            let p =
+              Project.create ~roots:[ dir ] ~documents:[] (analyze entry text)
+            in
+            let a = Project.analysis p in
+            let shape = Option.get (reference a "bt").structure in
+            Alcotest.(check (list string))
+              "known namespace fields" [ "cash0"; "positions" ] shape.fields;
+            Alcotest.(check bool)
+              "runtime shape is partial" true
+              ((not shape.complete) && not shape.certain)) );
     ( "function returns propagate table arguments across files",
       fun () ->
         with_project (fun dir file ->
