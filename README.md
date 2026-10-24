@@ -200,7 +200,16 @@ does not disable ordinary literal-load navigation.
 `entrypoints` adds the listed runners and their literal dependencies to the
 current document's dependency snapshot. This makes a kernel loaded by
 `run.rfl` visible from a strategy even when the runner chooses that strategy
-through a dynamic path. Up to 16 entrypoints may be listed. Their order does
+through a dynamic path. Up to 16 files or directories may be listed. Directory entrypoints recursively
+discover `.rfl` files, including newly created files and unsaved open buffers.
+Directory changes invalidate the cached snapshot. Hidden entries, `_build`,
+`_opam`, `vendor`, `vendors` and `node_modules` are skipped; symlinks inside
+discovered directories are not followed. Discovery is bounded to 128 files,
+4096 directory entries and 32 levels, with a hover explanation on truncation.
+For example, `"entrypoints": ["rayfall/"]` automatically includes new service
+modules. Use `["."]` to opt in to repository-wide discovery, subject to those
+exclusions and limits. Discovered scripts contribute candidate definitions;
+they are not assumed to execute together. Their order does
 not imply execution order; multiple runners contribute alternative candidates.
 
 `workingDirectory` resolves every relative load against that directory,

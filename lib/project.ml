@@ -167,6 +167,87 @@ let create ~roots ~documents entry =
             issue ("Cannot read " ^ path ^ ": " ^ Unix.error_message error);
             ([], None))
   in
+  (* Directory entrypoints opt in to bounded discovery. Watch every scanned
+     directory so creating/removing a source invalidates cached snapshots. *)
+  let entrypoints =
+    let found = ref Paths.empty and scanned = ref 0 in
+    let reported = ref false in
+    let limited () =
+      if not !reported then (
+        reported := true;
+        issue "Entrypoint discovery limit reached")
+    in
+    let excluded name =
+      String.starts_with ~prefix:"." name
+      || List.mem name
+           [ "_build"; "_opam"; "vendor"; "vendors"; "node_modules" ]
+    in
+    let add path =
+      if Paths.cardinal !found >= 128 then limited ()
+      else found := Paths.add path !found
+    in
+    let entries directory =
+      let handle = Unix.opendir directory in
+      Fun.protect
+        ~finally:(fun () -> Unix.closedir handle)
+        (fun () ->
+          let rec read acc =
+            if !scanned >= 4096 then (
+              limited ();
+              acc)
+            else
+              match Unix.readdir handle with
+              | "." | ".." -> read acc
+              | name ->
+                  incr scanned;
+                  read (name :: acc)
+              | exception End_of_file -> acc
+          in
+          List.sort String.compare (read []))
+    in
+    let rec walk depth path =
+      if depth > 32 || Paths.cardinal !found >= 128 then limited ()
+      else
+        try
+          watch path;
+          match (Unix.lstat path).Unix.st_kind with
+          | Unix.S_REG ->
+              if Filename.check_suffix path ".rfl" then add (canonical path)
+          | Unix.S_DIR ->
+              if !scanned >= 4096 then limited ()
+              else
+                List.iter
+                  (fun name ->
+                    if not (excluded name) then
+                      walk (depth + 1) (Filename.concat path name))
+                  (entries path)
+          | _ -> ()
+        with Unix.Unix_error (error, _, _) ->
+          issue
+            ("Cannot discover entrypoints in " ^ path ^ ": "
+           ^ Unix.error_message error)
+    in
+    let expand path =
+      if Sys.is_directory path then (
+        walk 0 path;
+        Hashtbl.iter
+          (fun candidate _ ->
+            if within path candidate && Filename.check_suffix candidate ".rfl"
+            then
+              let relative =
+                String.sub candidate (String.length path)
+                  (String.length candidate - String.length path)
+              in
+              if not (List.exists excluded (String.split_on_char '/' relative))
+              then add candidate)
+          overlays)
+      else add path
+    in
+    List.iter
+      (fun path -> try expand path with Sys_error message -> issue message)
+      entrypoints;
+    Paths.elements !found
+  in
   let load_paths importer path =
     let paths =
       if Filename.is_relative path then

@@ -452,6 +452,65 @@ let tests =
             let p = Project.create ~roots:[ dir ] ~documents:[ overlay ] a in
             count "removed entrypoint" 0
               (List.length (targets p a "from_runner"))) );
+    ( "directory entrypoints discover and refresh",
+      fun () ->
+        with_project (fun dir file ->
+            ignore (file ".rayfall-lsp.json" "{\"entrypoints\":[\"src\"]}");
+            ignore (file "src/a.rfl" "(set discovered 1)");
+            let text = "(list discovered added unsaved ignored symlinked)" in
+            let path = file "main.rfl" text in
+            let entry = analyze path text in
+            let cache = Project.Cache.create () in
+            let get documents =
+              Project.Cache.get cache ~roots:[ dir ] ~documents entry
+            in
+            let first = get [] in
+            count "initial discovery" 1
+              (List.length (targets first entry "discovered"));
+            Alcotest.(check bool) "unchanged cache" true (first == get []);
+            let added = file "src/nested/new.rfl" "(set added 2)" in
+            let changed = get [] in
+            count "new file" 1 (List.length (targets changed entry "added"));
+            Alcotest.(check bool)
+              "new directory invalidates" false (first == changed);
+            write added "(set added 22)";
+            Alcotest.(check bool) "edit invalidates" false (changed == get []);
+            let unsaved_path = Filename.concat dir "src/unsaved.rfl" in
+            let overlay = analyze unsaved_path "(set unsaved 3)" in
+            count "unsaved discovery" 1
+              (List.length (targets (get [ overlay ]) entry "unsaved"));
+            ignore (file "src/vendor/ignored.rfl" "(set ignored 4)");
+            ignore (file "src/_build/ignored.rfl" "(set ignored 5)");
+            ignore (file "src/.hidden.rfl" "(set ignored 6)");
+            let outside = file "outside.rfl" "(set symlinked 7)" in
+            let link = file "src/link.rfl" "" in
+            Sys.remove link;
+            Unix.symlink outside link;
+            let filtered = get [] in
+            count "excluded sources" 0
+              (List.length (targets filtered entry "ignored"));
+            count "symlink skipped" 0
+              (List.length (targets filtered entry "symlinked"));
+            Sys.remove added;
+            count "removed source" 0
+              (List.length (targets (get []) entry "added"))) );
+    ( "directory discovery is bounded",
+      fun () ->
+        with_project (fun dir file ->
+            ignore (file ".rayfall-lsp.json" "{\"entrypoints\":[\"src\"]}");
+            for i = 0 to 129 do
+              ignore
+                (file
+                   (Printf.sprintf "src/f%03d.rfl" i)
+                   (Printf.sprintf "(set x%d %d)" i i))
+            done;
+            let path = file "main.rfl" "x0" in
+            let entry = analyze path "x0" in
+            let project = Project.create ~roots:[ dir ] ~documents:[] entry in
+            Alcotest.(check bool)
+              "visible truncation" true
+              (List.mem "Entrypoint discovery limit reached"
+                 (Project.issues project))) );
     ( "invalid config keeps direct loads usable",
       fun () ->
         with_project (fun dir file ->
