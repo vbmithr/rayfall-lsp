@@ -281,13 +281,12 @@ let tests =
         Alcotest.(check bool)
           "ordinary quoted symbol is data" true
           (Analysis.at a (String.length s - 4) = None) );
-    ( "alter rejects lexical targets and respects shadowed builtin",
+    ( "alter targets a parameter and respects shadowed builtin",
       fun () ->
         let s = "(set f (fn [x] (alter 'x set 0 1)))" in
         let a = analyze s in
-        check_int "no lexical mutation target" 0
-          (List.length
-             (Analysis.targets (occurrence a (find s "'x")).resolution));
+        check_int "parameter target" (find s "x]")
+          (target a (find s "'x" + 1)).location.span.start_byte;
         let s = "(set f (fn [alter] (alter 'x set 0 1)))" in
         let a = analyze s in
         Alcotest.(check bool)
@@ -543,6 +542,83 @@ let tests =
         Alcotest.check_raises "no split surrogate"
           (Invalid_argument "Position splits a UTF-16 character or exceeds line")
           (fun () -> ignore (Source.offset s { line = 0; character = 2 })) );
+    ( "quoted mutators amend the innermost binding",
+      fun () ->
+        let kind_at a byte =
+          match (occurrence a byte).resolution with
+          | Analysis.Resolved b -> Some (b.kind, b.location.span.start_byte)
+          | _ -> None
+        in
+        let local_target text needle decl =
+          let a = analyze text in
+          Alcotest.(check (option (pair bool int)))
+            needle
+            (Some (true, find text decl))
+            (Option.map
+               (fun (k, at) -> (k <> Analysis.Global, at))
+               (kind_at a (find text needle + 1)))
+        in
+        local_target "(set t 1) (set f (fn [] (let t [1]) (insert 't 2) t))"
+          "'t 2" "t [1]";
+        local_target
+          "(set t 1) (set f (fn [] (let t [1]) (alter 't set 0 2) t))" "'t set"
+          "t [1]";
+        local_target "(set f (fn [t] (alter 't set 0 2) t))" "'t set" "t]";
+        local_target "(set f (fn [] (let r {x: 1}) (insert 'r.x 2) r))" "'r.x"
+          "r {x";
+        local_target "(set f (fn [] (let t [1]) (if t (insert 't 2)) t))" "'t 2"
+          "t [1]";
+        (* an alias bound before the function is a mutator head *)
+        local_target "(set ins insert) (set f (fn [] (let t [1]) (ins 't 2) t))"
+          "'t 2" "t [1]";
+        (* a capture resolves to the binding it copies *)
+        local_target
+          "(set f (fn [] (let t [1]) (let g (fn [] (insert 't 2))) t))" "'t 2"
+          "t [1]";
+        let is_data text needle =
+          Alcotest.(check bool)
+            needle true
+            (Analysis.at (analyze text) (find text needle + 1) = None)
+        in
+        (* other heads are ordinary callees, and their quoted arguments data *)
+        is_data "(set f (fn [g] (let t [1]) (g 't 2) t))" "'t 2";
+        is_data "(set f (fn [] (let g insert) (let t [1]) (g 't 2) t))" "'t 2";
+        is_data
+          "(set ins 1) (set ins insert) (set ins 2) (set f (fn [t] (ins 't 2)))"
+          "'t 2";
+        (* a separately defined function cannot reach a caller's local *)
+        let text =
+          "(set t [1]) (set f (fn [] (insert 't 2))) (set g (fn [] (let t 1) \
+           (f)))"
+        in
+        (match
+           (occurrence (analyze text) (find text "'t 2" + 1)).resolution
+         with
+        | Analysis.Candidates ([ b ], _) ->
+            Alcotest.(check bool) "global" true (b.kind = Analysis.Global)
+        | r -> failwith (Analysis.describe r));
+        (* inside a loop a target is as uncertain as a read *)
+        let text =
+          "(set f (fn [] (let t [1]) (times [i 2] (insert 't i)) t))"
+        in
+        (match
+           (occurrence (analyze text) (find text "'t i" + 1)).resolution
+         with
+        | Analysis.Runtime_dependent _ -> ()
+        | r -> failwith (Analysis.describe r));
+        (* amending a local leaves later global lookups certain *)
+        let globals head =
+          let text =
+            Printf.sprintf "(set x 1) (let t [1]) (do (let t [2]) %s) x" head
+          in
+          (occurrence (analyze text) (String.length text - 1)).resolution
+        in
+        (match globals "(insert 't 3)" with
+        | Analysis.Resolved _ -> ()
+        | r -> failwith (Analysis.describe r));
+        match globals "(insert 'x 3)" with
+        | Analysis.Candidates _ -> ()
+        | r -> failwith (Analysis.describe r) );
     ( "unknown query scope",
       fun () ->
         let s = "(set x 1) (select {from: t x: x})" in

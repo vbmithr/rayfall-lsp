@@ -140,11 +140,16 @@ imported argument hints are capped at 16384 observations per analysis. Nothing
 executes project code. Unsaved caller edits refresh the hints.
 
 Quoted symbols normally remain data. The first argument to the builtin
-`alter` is an exception: `(alter 'bt.qty set i value)` references a mutation
-target, so `bt` and `qty` support definition navigation there. The unevaluated
-operation name and ordinary quoted symbols remain data. Lexical alter targets
-are marked unsupported, matching Rayforce's restriction on local mutation.
-A shadowed function named `alter` keeps ordinary function-call semantics.
+`alter` and `insert` are exceptions: `(alter 'bt.qty set i value)` and
+`(insert 'records rows)` reference a mutation target, while the `alter` operation
+name and ordinary quoted symbols remain data. A target resolves as a read does, to
+the innermost local or parameter and otherwise to a global, so it appears in
+navigation and find references. Amending a local leaves global lookups certain.
+As in Rayforce, this holds for a literal head or a global alias bound before the
+function, such as `(set ins insert)`; through any other head a quoted symbol stays
+data. Inside `while`, `times` and `try` a target is runtime-dependent, as a read is.
+`upsert` is not modeled, because Rayforce's quoted form can still write a global.
+A shadowed function named `alter` or `insert` keeps ordinary function-call semantics.
 
 Dynamically constructed query dictionaries remain opaque. Ordinary
 dictionaries and vectors keep their literal-data semantics outside recognized

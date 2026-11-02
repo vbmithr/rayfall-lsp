@@ -52,9 +52,13 @@ passthrough columns survive those operations. Other join kinds, arbitrary
 dynamic schemas, grouped update outputs, and control clauses remain future work.
 
 Quoted symbols stay data except in recognized reference positions. The first
-argument of the builtin `alter` names a mutation target; its operation argument
-is unevaluated data. Explicit shadowing disables that special interpretation,
-and lexical targets remain unsupported as in Rayforce.
+argument of a builtin `alter` or `insert` names a mutation target, resolved
+lexically before globals as Rayforce does since #954; the operation argument of
+`alter` is unevaluated data. A global alias bound earlier in the document, such
+as `(set ins insert)`, is also a mutator head. Aliases are not followed across
+loads, nor through a rebinding in a conditional arm. Explicit shadowing disables
+the special interpretation. Only a non-lexical target makes later global lookups
+uncertain.
 
 Hover now exposes bounded dictionary and table shapes alongside binding
 resolution. Literal dictionary keys, literal-key dictionary constructors,

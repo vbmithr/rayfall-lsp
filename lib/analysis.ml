@@ -70,6 +70,7 @@ type env = {
   opaque : bool;
   query : bool;
   columns : schema option;
+  mutators : string Names.t;
 }
 
 let unknown = { origins = []; unknown = true; schema = None; dictionary = None }
@@ -148,6 +149,7 @@ let builtin_names =
     "inner-join";
     "full-join";
     "alter";
+    "insert";
     "at";
     "get";
     "count";
@@ -160,6 +162,22 @@ let builtin_names =
   ]
 
 let local env name = List.find_map (Names.find_opt name) env.locals
+
+(* A quoted target names a binding only under a literal alter or insert head or
+   a global alias bound before the function using it. Any other head is an
+   ordinary callee, whose quoted arguments stay data. *)
+let mutator_of env name =
+  if local env name <> None then None
+  else
+    match Names.find_opt name env.mutators with
+    | Some _ as m -> m
+    | None ->
+        if
+          List.mem name [ "alter"; "insert" ]
+          && not (Names.mem name env.globals)
+        then Some name
+        else None
+
 let source t = t.source
 let syntax t = t.syntax
 let bindings t = t.bindings
@@ -550,6 +568,7 @@ let analyze ?(imports = []) source =
             }
           name
   in
+  let quoted_name i = String.sub (text i) 1 (String.length (text i) - 1) in
   let opaque i reason =
     let pending = ref [ i ] in
     while !pending <> [] do
@@ -561,6 +580,23 @@ let analyze ?(imports = []) source =
           | "identifier" ->
               remember i (text i) (`Known (Runtime_dependent reason)) unknown
           | "quoted_symbol" | "vector" | "string" | "comment" -> ()
+          | "call"
+            when match children i with
+                 | head :: target :: _ ->
+                     List.mem (text head) [ "alter"; "insert" ]
+                     && (node target).kind = "quoted_symbol"
+                 | _ -> false ->
+              let target = List.nth (children i) 1 in
+              let name = quoted_name target in
+              remember
+                ~span:
+                  {
+                    Source.start_byte =
+                      (node target).span.end_byte - String.length name;
+                    end_byte = (node target).span.end_byte;
+                  }
+                i name (`Known (Runtime_dependent reason)) unknown;
+              pending := List.rev_append (children i) !pending
           | "pair" -> (
               match List.rev (children i) with
               | v :: _ -> pending := v :: !pending
@@ -806,34 +842,49 @@ let analyze ?(imports = []) source =
                         | _ -> None)
                 in
                 (env, { unknown with schema }))
-              else if special && name = "alter" then (
-                head_ref ();
-                match args with
-                | target :: op :: rest ->
-                    if (node target).kind = "quoted_symbol" then
-                      let target_name =
-                        String.sub (text target) 1
-                          (String.length (text target) - 1)
-                      in
-                      let root =
-                        List.hd (String.split_on_char '.' target_name)
-                      in
-                      if local env root <> None then
-                        remember target target_name
-                          (`Known
-                             (Runtime_dependent "alter rejects lexical targets"))
-                          unknown
-                      else
+              else if
+                (node head).kind = "identifier" && mutator_of env name <> None
+              then (
+                if special then head_ref ()
+                else ignore (walk (depth + 1) env head);
+                let mutator = Option.get (mutator_of env name) in
+                match (mutator, args) with
+                | "alter", _ :: _ :: _ | "insert", _ :: _ ->
+                    let target = List.hd args in
+                    let quoted = (node target).kind = "quoted_symbol" in
+                    let target_name =
+                      if quoted then quoted_name target else ""
+                    in
+                    let lexical =
+                      quoted
+                      && local env
+                           (List.hd (String.split_on_char '.' target_name))
+                         <> None
+                    in
+                    let target_value =
+                      if quoted then (
                         ignore
                           (remember_name ~name:target_name
-                             { env with query = false } target)
-                    else ignore (walk (depth + 1) env target);
-                    (* The operation name is unevaluated data, not the set/concat function. *)
-                    ignore op;
+                             { env with query = false } target);
+                        unknown)
+                      else snd (walk (depth + 1) env target)
+                    in
+                    (* The operation name of alter is unevaluated data, not the
+                       set/concat function. *)
+                    let rest =
+                      if mutator = "alter" then List.tl (List.tl args)
+                      else List.tl args
+                    in
                     let env, _ = sequence (depth + 1) env rest in
-                    ({ env with opaque = true }, unknown)
+                    (* Amending a local cannot change a global; any other target
+                       can. A value-form insert returns a table of the same
+                       columns. *)
+                    ( (if lexical then env else { env with opaque = true }),
+                      if mutator = "insert" then
+                        { unknown with schema = target_value.schema }
+                      else unknown )
                 | _ ->
-                    List.iter (fun j -> opaque j "incomplete alter") args;
+                    List.iter (fun j -> opaque j ("incomplete " ^ mutator)) args;
                     (env, unknown))
               else if special && name = "fn" then (
                 head_ref ();
@@ -889,7 +940,13 @@ let analyze ?(imports = []) source =
                     { env with locals = Names.empty :: env.locals }
                     args
                 in
-                ({ env with globals = inner.globals; opaque = inner.opaque }, v))
+                ( {
+                    env with
+                    globals = inner.globals;
+                    opaque = inner.opaque;
+                    mutators = inner.mutators;
+                  },
+                  v ))
               else if special && List.mem name [ "set"; "let" ] then (
                 head_ref ();
                 match args with
@@ -903,7 +960,21 @@ let analyze ?(imports = []) source =
                     in
                     ignore (remember_name ~definition:b env label);
                     if global then
-                      ({ env with globals = Names.add b.name b env.globals }, v)
+                      let mutators =
+                        match
+                          if (node rhs).kind = "identifier" then
+                            mutator_of env (text rhs)
+                          else None
+                        with
+                        | Some m -> Names.add b.name m env.mutators
+                        | None -> Names.remove b.name env.mutators
+                      in
+                      ( {
+                          env with
+                          globals = Names.add b.name b env.globals;
+                          mutators;
+                        },
+                        v )
                     else
                       match env.locals with
                       | scope :: rest ->
@@ -1105,6 +1176,7 @@ let analyze ?(imports = []) source =
          opaque = false;
          query = false;
          columns = None;
+         mutators = Names.empty;
        }
        0);
   let bindings = List.rev !bindings in
