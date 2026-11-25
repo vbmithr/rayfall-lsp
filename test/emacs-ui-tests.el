@@ -121,4 +121,18 @@
 (ert-deftest signature-never-interpolates-odd-names ()
   (cl-letf (((symbol-function 'rayfall--repl-live-p) (lambda () (ert-fail "queried"))))
     (should-not (rayfall-lsp--signature "min) (exit"))))
+(ert-deftest name-at-point-keeps-dotted-builtins ()
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert "(.ipc.open h)")
+    (goto-char (point-min))
+    (search-forward ".ipc.o")
+    (should (equal (rayfall-lsp--name-at-point) ".ipc.open"))
+    (goto-char (point-max))
+    (should-not (rayfall-lsp--name-at-point))))
+(ert-deftest raw-reply-keeps-empty-last-field ()
+  (let ((rayfall-lsp--raw-reply t))
+    (should (equal (rayfall--parse-completions@rayfall-lsp-raw-reply
+                    #'ignore "'vary\n'.ipc.open\n\n")
+                   "'vary\n'.ipc.open\n"))))
 (ert-run-tests-batch-and-exit)

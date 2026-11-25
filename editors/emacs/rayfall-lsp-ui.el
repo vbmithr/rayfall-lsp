@@ -119,7 +119,8 @@ those values.  Do not query quoted data, strings, comments, or a busy REPL."
 The flag is buffer-local because the reply may be consumed by the process
 filter, outside the dynamic extent of the request."
   (if rayfall-lsp--raw-reply
-      (string-trim output)
+      ;; Drop only the final line terminator: an empty last field is data.
+      (replace-regexp-in-string "\r?\n\\'" "" output)
     (funcall parse output)))
 
 (defconst rayfall-lsp--name-regexp "\\`[A-Za-z0-9_.?!+*/<=>%~#$&:^|-]+\\'"
@@ -165,10 +166,11 @@ Ask `.repl.signature', which evaluates nothing and calls nothing."
           (let ((lines (and (stringp rayfall-repl--completion-result)
                             (split-string rayfall-repl--completion-result
                                           "\r?\n"))))
+            ;; An undocumented builtin has an empty usage line.
             (when (= (length lines) 3)
-              (cons (string-remove-prefix "'" (nth 0 lines))
-                    (cons (string-remove-prefix "'" (nth 1 lines))
-                          (list (nth 2 lines)))))))))))
+              (list (string-remove-prefix "'" (string-trim (nth 0 lines)))
+                    (string-remove-prefix "'" (string-trim (nth 1 lines)))
+                    (string-trim (nth 2 lines))))))))))
 
 (defun rayfall-lsp--describe-signature (name)
   "Return display text for builtin NAME, or nil when NAME is not a builtin."
@@ -180,6 +182,17 @@ Ask `.repl.signature', which evaluates nothing and calls nothing."
                  (format "%s: alias of builtin %s (%s)" name builtin kind))
                (unless (equal usage "") (concat "\n" usage)))))))
 
+(defun rayfall-lsp--name-at-point ()
+  "Return the whole name at point, dotted builtins such as `.ipc.open' included.
+The mode's syntax table splits at dots, so scan with the completion charset."
+  (save-excursion
+    (let ((chars "A-Za-z0-9_.?!+*/<=>%~#$&:^|-"))
+      (skip-chars-backward chars)
+      (let ((start (point)))
+        (skip-chars-forward chars)
+        (and (< start (point))
+             (buffer-substring-no-properties start (point)))))))
+
 (defun rayfall-lsp-find-definition ()
   "Go to the definition of the identifier at point.
 A builtin has no source, so show its signature from the live session instead
@@ -188,7 +201,7 @@ of failing.  A user binding that shadows a builtin still jumps to its source."
   (condition-case err
       (call-interactively #'xref-find-definitions)
     (user-error
-     (let* ((name (thing-at-point 'symbol t))
+     (let* ((name (rayfall-lsp--name-at-point))
             (text (and name (not (nth 8 (syntax-ppss)))
                        (rayfall-lsp--describe-signature name))))
        (if text
