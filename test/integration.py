@@ -358,9 +358,9 @@ def hover_text(replies, identifier):
     return replies[identifier]["result"]["contents"]["value"]
 if shutil.which("rayforce"):
     replies = run(builtin_messages)
-    assert "println: builtin (vary)" in hover_text(replies, 2), replies[2]
-    assert hover_text(replies, 3).startswith("first: builtin ("), replies[3]
-    assert ".ipc.open: builtin (vary)" in hover_text(replies, 4), replies[4]
+    assert "(println" in hover_text(replies, 2), replies[2]
+    assert "(first" in hover_text(replies, 3), replies[3]
+    assert "(.ipc.open <address" in hover_text(replies, 4), replies[4]
     # A user binding that shadows a builtin is the user's, not the engine's.
     assert "Candidate definitions" in hover_text(replies, 5), replies[5]
     assert "builtin" not in hover_text(replies, 5), replies[5]

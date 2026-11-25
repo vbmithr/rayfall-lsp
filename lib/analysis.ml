@@ -169,6 +169,7 @@ let query_global_reason =
   "global lookup may be shadowed by a query column; source schema is unknown"
 
 let global_reason = "global lookup depends on the call/execution context"
+let is_generic_reason why = String.equal why global_reason
 
 let may_be_builtin = function
   | Unresolved _ | Builtin _ -> true

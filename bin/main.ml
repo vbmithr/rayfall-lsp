@@ -126,7 +126,9 @@ let describe_occurrence project a (o : Analysis.occurrence) =
     | Some signature -> (
         let text = Engine.describe ~name:o.name signature in
         match resolution with
-        | Analysis.Runtime_dependent _ -> text ^ "\n" ^ static
+        | Analysis.Runtime_dependent why
+          when not (Analysis.is_generic_reason why) ->
+            text ^ "\n" ^ static
         | _ -> text)
 
 let handle_request method_ params =

@@ -54,3 +54,7 @@ val targets : resolution -> binding list
 val describe : resolution -> string
 val structure_at : t -> int -> (Source.span * structure) option
 val describe_structure : structure -> string
+
+val is_generic_reason : string -> bool
+(** The stock "depends on the call context" reason, which says nothing a reader
+    can act on once the engine has confirmed a builtin. *)

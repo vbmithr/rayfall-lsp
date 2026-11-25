@@ -6,12 +6,14 @@ let reply =
   "'unary\n\
    'min\n\
    false\n\
+   Smallest element of a vector, or the lesser of two values\n\
    (min <x: vector, atom or list>) or (min <a: num> <b: num>)\n"
 
 let signature =
   Alcotest.testable
     (fun ppf (s : Engine.signature) ->
-      Format.fprintf ppf "%s/%s/%b/%S" s.kind s.builtin s.special s.usage)
+      Format.fprintf ppf "%s/%s/%b/%S/%S" s.kind s.builtin s.special s.summary
+        s.usage)
     ( = )
 
 let option_signature = Alcotest.option signature
@@ -23,15 +25,30 @@ let parses () =
          kind = "unary";
          builtin = "min";
          special = false;
+         summary = "Smallest element of a vector, or the lesser of two values";
          usage = "(min <x: vector, atom or list>) or (min <a: num> <b: num>)";
        })
     (Engine.parse reply);
   Alcotest.check option_signature "undocumented builtin keeps its empty usage"
-    (Some { kind = "vary"; builtin = ".ipc.open"; special = false; usage = "" })
-    (Engine.parse "'vary\n'.ipc.open\nfalse\n\n");
+    (Some
+       {
+         kind = "vary";
+         builtin = ".ipc.open";
+         special = false;
+         summary = "";
+         usage = "";
+       })
+    (Engine.parse "'vary\n'.ipc.open\nfalse\n\n\n");
   Alcotest.check option_signature "special form and CRLF"
-    (Some { kind = "vary"; builtin = "if"; special = true; usage = "(if ...)" })
-    (Engine.parse "'vary\r\n'if\r\ntrue\r\n(if ...)\r\n");
+    (Some
+       {
+         kind = "vary";
+         builtin = "if";
+         special = true;
+         summary = "Conditional";
+         usage = "(if ...)";
+       })
+    (Engine.parse "'vary\r\n'if\r\ntrue\r\nConditional\r\n(if ...)\r\n");
   List.iter
     (fun noise ->
       Alcotest.check option_signature noise None (Engine.parse noise))
@@ -39,7 +56,7 @@ let parses () =
       "";
       "'missing\n";
       "'missing\n''\nfalse\n\n";
-      "error: boom\n\n\n\n";
+      "error: boom\n\n\n\n\n";
       "'value\n''\nfalse\n\n";
     ]
 
@@ -47,22 +64,35 @@ let describes () =
   let s = Option.get (Engine.parse reply) in
   Alcotest.(check string)
     "builtin"
-    "min: builtin (unary)\n\
+    "Smallest element of a vector, or the lesser of two values\n\
      (min <x: vector, atom or list>) or (min <a: num> <b: num>)"
     (Engine.describe ~name:"min" s);
   Alcotest.(check string)
     "alias"
-    "m: alias of builtin min (unary)\n\
+    "m: alias of min\n\
+     Smallest element of a vector, or the lesser of two values\n\
      (min <x: vector, atom or list>) or (min <a: num> <b: num>)"
     (Engine.describe ~name:"m" s);
   Alcotest.(check string)
-    "no usage" ".ipc.open: builtin (vary)"
+    "nothing documented" ".ipc.open: builtin (vary)"
     (Engine.describe ~name:".ipc.open"
-       { kind = "vary"; builtin = ".ipc.open"; special = false; usage = "" });
+       {
+         kind = "vary";
+         builtin = ".ipc.open";
+         special = false;
+         summary = "";
+         usage = "";
+       });
   Alcotest.(check string)
-    "special" "if: builtin (vary, special form)"
+    "special" "if: special form"
     (Engine.describe ~name:"if"
-       { kind = "vary"; builtin = "if"; special = true; usage = "" })
+       {
+         kind = "vary";
+         builtin = "if";
+         special = true;
+         summary = "";
+         usage = "";
+       })
 
 let validates_names () =
   List.iter
@@ -135,7 +165,8 @@ let real_engine () =
     (match Engine.lookup engine "min" with
     | Some s ->
         Alcotest.(check string) "min" "min" s.builtin;
-        check "usage documented" true (s.usage <> "")
+        check "usage documented" true (s.usage <> "");
+        check "summary documented" true (s.summary <> "")
     | None -> Alcotest.fail "min is a builtin");
     (match Engine.lookup engine ".ipc.open" with
     | Some s -> Alcotest.(check string) "dotted" ".ipc.open" s.builtin

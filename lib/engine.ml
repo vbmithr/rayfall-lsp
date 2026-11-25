@@ -2,6 +2,7 @@ type signature = {
   kind : string;
   builtin : string;
   special : bool;
+  summary : string;
   usage : string;
 }
 
@@ -20,9 +21,10 @@ let name_char = function
 let valid_name name =
   name <> "" && String.length name <= 128 && String.for_all name_char name
 
-let fields = [ "kind"; "builtin"; "special"; "usage" ]
+let fields = [ "kind"; "builtin"; "special"; "summary"; "usage" ]
 
-(* One field per line, usage last: it may be empty or contain anything. *)
+(* One field per line: the summary is one line, usage comes last because it
+   may be empty or contain anything. *)
 let query name =
   List.map
     (fun field ->
@@ -49,7 +51,7 @@ let drop_final_newline output =
 
 let parse output =
   match String.split_on_char '\n' (drop_final_newline output) with
-  | kind :: builtin :: special :: usage ->
+  | kind :: builtin :: special :: summary :: usage ->
       let kind = strip_quote kind and builtin = strip_quote builtin in
       if is_calling_convention kind && builtin <> "" then
         Some
@@ -57,6 +59,7 @@ let parse output =
             kind;
             builtin;
             special = String.trim special = "true";
+            summary = String.trim summary;
             usage = String.trim (String.concat "\n" usage);
           }
       else None
@@ -133,10 +136,13 @@ let lookup t name =
         answer
 
 let describe ~name s =
-  let head =
-    if s.builtin = name then
-      Printf.sprintf "%s: builtin (%s%s)" name s.kind
-        (if s.special then ", special form" else "")
-    else Printf.sprintf "%s: alias of builtin %s (%s)" name s.builtin s.kind
+  let notes =
+    (if s.builtin = name then [] else [ "alias of " ^ s.builtin ])
+    @ if s.special then [ "special form" ] else []
   in
-  if s.usage = "" then head else head ^ "\n" ^ s.usage
+  let note =
+    if notes = [] then "" else name ^ ": " ^ String.concat ", " notes
+  in
+  match List.filter (fun t -> t <> "") [ note; s.summary; s.usage ] with
+  | [] -> Printf.sprintf "%s: builtin (%s)" name s.kind
+  | parts -> String.concat "\n" parts

@@ -11,6 +11,8 @@ type signature = {
       (** The builtin's own name; differs from the name asked for when that name
           is an alias. *)
   special : bool;  (** A special form: its arguments are not evaluated. *)
+  summary : string;
+      (** What the builtin does, in one line, or [""] when undocumented. *)
   usage : string;  (** Documented call forms, or [""] when undocumented. *)
 }
 
@@ -34,4 +36,6 @@ val parse : string -> signature option
 (** Parse the engine's reply to the query this module sends. *)
 
 val describe : name:string -> signature -> string
-(** Hover text for a builtin. *)
+(** Hover text for a builtin: a note when it is an alias or a special form, then
+    its summary and usage. A builtin is always built in and its arity is in the
+    usage, so the calling convention appears only when nothing else is known. *)

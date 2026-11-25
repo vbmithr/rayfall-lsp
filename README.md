@@ -324,8 +324,10 @@ Company idle delay. `M-TAB` can always request completion explicitly. Other LSP 
 ## Builtins
 
 Hover on a name the document does not bind shows what the Rayforce engine says
-about it. For a builtin that is its calling convention and documented call
-forms, for example `println: builtin (vary)`. The server asks
+about it. For a builtin that is a one-line summary of what it does and its documented
+call forms, preceded by a note when the name is an alias or a special form. A
+builtin with nothing documented shows only its calling convention, for example
+`name: builtin (vary)`. The server asks
 `(.repl.signature 'name)`, which evaluates and calls nothing and is given only a
 validated name, never project code. It runs `rayforce` once per distinct name
 (a few milliseconds) and caches the answer, including a negative one. Set
@@ -334,17 +336,17 @@ validated name, never project code. It runs `rayforce` once per distinct name
 A name the document assigns keeps its own definition: the engine is asked only
 about names nothing in the document binds. A missing, slow or older engine falls
 back to the static description, silently. When the analysis cannot tell whether
-a call rebinds names, hover shows the builtin and keeps the runtime-dependent
+a call rebinds names, hover shows the builtin and keeps the specific runtime-dependent
 caveat. Go to definition on a builtin finds nothing, because a builtin has no
 source; in Emacs the definition key then shows this hover instead.
 
 The text is the engine's own, so a builtin it does not document shows only its
 calling convention. About 50 names are in that state, among them `.ipc.open`,
 `.json.parse` and `println`
-([Rayforce #1736](https://github.com/RayforceDB/rayforce/issues/1736)). Even a
-documented one gives only its call shape, not a description, until the engine
-reports one ([#1737](https://github.com/RayforceDB/rayforce/issues/1737)). The
-server adds no help text of its own.
+([Rayforce #1736](https://github.com/RayforceDB/rayforce/issues/1736)). The
+summary comes from the engine's `summary` field
+([#1737](https://github.com/RayforceDB/rayforce/issues/1737)). The server adds
+no help text of its own.
 
 Ensure `rayfall-lsp` is on Emacs's `exec-path`. Use `M-.` for definitions;
 hover information is available through Eglot/ElDoc. Other LSP clients can
