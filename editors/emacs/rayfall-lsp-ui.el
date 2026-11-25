@@ -71,6 +71,11 @@ This covers global names and builtin namespaces, not dictionary fields."
 (defvar rayfall-repl-buffer)
 (defvar rayfall-repl--pending-eval)
 (defvar rayfall-repl--completion-request)
+(defvar rayfall-repl--completion-result)
+(defvar rayfall--repl-sentinel)
+(defvar rayfall--repl-sentinel-command)
+(declare-function rayfall--cancel-prompt-timer "rayfall-mode")
+(declare-function rayfall--complete-completion-request "rayfall-mode")
 
 (defun rayfall-lsp-live-completion-at-point ()
   "Offer actual names from an existing Rayforce session before static hints.
@@ -101,6 +106,94 @@ those values.  Do not query quoted data, strings, comments, or a busy REPL."
                 (list start end candidates :exclusive 'no
                       :annotation-function (lambda (_) " [Rayforce session]"))))
           (error nil))))))
+
+;;; Builtin signatures
+
+(defvar rayfall-lsp--raw-reply nil
+  "Non-nil in a REPL buffer while a request wants its reply unparsed.")
+(make-variable-buffer-local 'rayfall-lsp--raw-reply)
+
+(define-advice rayfall--parse-completions
+    (:around (parse output) rayfall-lsp-raw-reply)
+  "Return OUTPUT as text for a signature request, which is not a symbol vector.
+The flag is buffer-local because the reply may be consumed by the process
+filter, outside the dynamic extent of the request."
+  (if rayfall-lsp--raw-reply
+      (string-trim output)
+    (funcall parse output)))
+
+(defconst rayfall-lsp--name-regexp "\\`[A-Za-z0-9_.?!+*/<=>%~#$&:^|-]+\\'"
+  "Names sent to the REPL.  Anything else is never interpolated into code.")
+
+(defun rayfall-lsp--signature (name)
+  "Return (KIND BUILTIN USAGE) for NAME from the idle live session, or nil.
+Ask `.repl.signature', which evaluates nothing and calls nothing."
+  (when (and (string-match-p rayfall-lsp--name-regexp name)
+             (fboundp 'rayfall--repl-live-p)
+             (rayfall--repl-live-p))
+    (with-current-buffer rayfall-repl-buffer
+      (unless (or rayfall-repl--pending-eval rayfall-repl--completion-request)
+        (rayfall--cancel-prompt-timer)
+        (let* ((process (get-buffer-process (current-buffer)))
+               (deadline (+ (float-time) rayfall-lsp-live-completion-timeout))
+               (signature (format "(.repl.signature (quote %s))" name)))
+          (setq rayfall-lsp--raw-reply t
+                rayfall-repl--completion-result nil
+                rayfall-repl--completion-request
+                (list (copy-marker (process-mark process))
+                      rayfall--repl-sentinel))
+          (unwind-protect
+              (progn
+                (comint-send-string
+                 process
+                 (concat
+                  (mapconcat (lambda (field)
+                               (format "(println (at %s (quote %s)))\n"
+                                       signature field))
+                             '("kind" "builtin" "usage") "")
+                  rayfall--repl-sentinel-command))
+                (while (and rayfall-repl--completion-request
+                            (< (float-time) deadline))
+                  (accept-process-output process 0.05))
+                (when rayfall-repl--completion-request
+                  (rayfall--complete-completion-request)))
+            ;; A failed or partial reply must never block later evaluation.
+            (when rayfall-repl--completion-request
+              (set-marker (car rayfall-repl--completion-request) nil)
+              (setq rayfall-repl--completion-request nil))
+            (setq rayfall-lsp--raw-reply nil))
+          (let ((lines (and (stringp rayfall-repl--completion-result)
+                            (split-string rayfall-repl--completion-result
+                                          "\r?\n"))))
+            (when (= (length lines) 3)
+              (cons (string-remove-prefix "'" (nth 0 lines))
+                    (cons (string-remove-prefix "'" (nth 1 lines))
+                          (list (nth 2 lines)))))))))))
+
+(defun rayfall-lsp--describe-signature (name)
+  "Return display text for builtin NAME, or nil when NAME is not a builtin."
+  (pcase (rayfall-lsp--signature name)
+    (`(,kind ,builtin ,usage)
+     (when (and (not (equal builtin "")) (member kind '("unary" "binary" "vary")))
+       (concat (if (equal builtin name)
+                   (format "%s: builtin (%s)" name kind)
+                 (format "%s: alias of builtin %s (%s)" name builtin kind))
+               (unless (equal usage "") (concat "\n" usage)))))))
+
+(defun rayfall-lsp-find-definition ()
+  "Go to the definition of the identifier at point.
+A builtin has no source, so show its signature from the live session instead
+of failing.  A user binding that shadows a builtin still jumps to its source."
+  (interactive)
+  (condition-case err
+      (call-interactively #'xref-find-definitions)
+    (user-error
+     (let* ((name (thing-at-point 'symbol t))
+            (text (and name (not (nth 8 (syntax-ppss)))
+                       (rayfall-lsp--describe-signature name))))
+       (if text
+           (rayfall-lsp--display-inspection text nil)
+         (signal (car err) (cdr err)))))))
 
 (defun rayfall-lsp--show-single-candidate ()
   "Keep the Company menu visible even for one matching candidate."
@@ -154,6 +247,7 @@ those values.  Do not query quoted data, strings, comments, or a busy REPL."
                                   completion-at-point-functions))))
     (add-hook 'post-self-insert-hook #'rayfall-lsp-complete-after-dot nil t)
     (local-set-key (kbd "M-TAB") #'rayfall-lsp-complete)
+    (local-set-key (kbd "M-.") #'rayfall-lsp-find-definition)
     (local-set-key (kbd "C-c C-d") #'rayfall-lsp-describe-at-point)))
 
 (add-hook 'eglot-managed-mode-hook #'rayfall-lsp-on-demand-setup)

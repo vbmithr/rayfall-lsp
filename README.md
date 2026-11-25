@@ -317,6 +317,14 @@ remain unsupported: a callback parameter such as `ctx` may have no fields.
 The dot trigger opens the menu immediately, while other prefixes use the
 Company idle delay. `M-TAB` can always request completion explicitly. Other LSP clients can use the advertised `.` and quote triggers.
 
+On a builtin, which has no source, `M-.` shows its signature instead of failing
+with "No definitions found". The Emacs helper asks the existing, idle REPL for
+`(.repl.signature 'name)`, which evaluates and calls nothing, and shows the
+engine's own usage text (aliases such as `(set m min)` report the builtin they
+hold). A user binding that shadows a builtin still jumps to its source. Without
+a live session `M-.` behaves as before. This needs a Rayforce that has
+`.repl.signature` ([#947](https://github.com/RayforceDB/rayforce/issues/947)).
+
 Ensure `rayfall-lsp` is on Emacs's `exec-path`. Use `M-.` for definitions;
 hover information is available through Eglot/ElDoc. Other LSP clients can
 launch the same command with language ID `rayfall`.
