@@ -334,6 +334,12 @@ a call rebinds names, hover shows the builtin and keeps the runtime-dependent
 caveat. Go to definition on a builtin finds nothing, because a builtin has no
 source; in Emacs the definition key then shows this hover instead.
 
+The text is the engine's own, so a builtin it does not document shows only its
+calling convention. About 50 names are in that state, among them `.ipc.open`,
+`.json.parse` and `println`
+([Rayforce #1736](https://github.com/RayforceDB/rayforce/issues/1736)); the
+server adds no help text of its own.
+
 Ensure `rayfall-lsp` is on Emacs's `exec-path`. Use `M-.` for definitions;
 hover information is available through Eglot/ElDoc. Other LSP clients can
 launch the same command with language ID `rayfall`.
