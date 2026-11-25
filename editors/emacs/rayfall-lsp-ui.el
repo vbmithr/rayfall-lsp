@@ -252,7 +252,15 @@ of failing.  A user binding that shadows a builtin still jumps to its source."
         ((not (executable-find rayfall-program))
          (user-error "%s (builtin signatures need `%s' on exec-path; see `rayfall-program')"
                      (error-message-string err) rayfall-program))
-        (t (signal (car err) (cdr err))))))))
+        ;; Say why no signature was found: nothing else tells a user whether
+        ;; her point, the buffer or the engine is at fault.
+        ((null name)
+         (user-error "%s (no name at point)" (error-message-string err)))
+        ((nth 8 (syntax-ppss))
+         (user-error "%s (point is in a string or comment)"
+                     (error-message-string err)))
+        (t (user-error "%s (`%s' is not a builtin that `%s' knows)"
+                       (error-message-string err) name rayfall-program)))))))
 
 (defun rayfall-lsp--show-single-candidate ()
   "Keep the Company menu visible even for one matching candidate."
@@ -306,7 +314,10 @@ of failing.  A user binding that shadows a builtin still jumps to its source."
                                   completion-at-point-functions))))
     (add-hook 'post-self-insert-hook #'rayfall-lsp-complete-after-dot nil t)
     (local-set-key (kbd "M-TAB") #'rayfall-lsp-complete)
-    (local-set-key (kbd "M-.") #'rayfall-lsp-find-definition)
+    ;; Remap the command, not one key: users bind definition lookup to C-c C-l
+    ;; and others.  The wrapper calls `xref-find-definitions' directly, so the
+    ;; remapping cannot recurse.
+    (local-set-key [remap xref-find-definitions] #'rayfall-lsp-find-definition)
     (local-set-key (kbd "C-c C-d") #'rayfall-lsp-describe-at-point)))
 
 (add-hook 'eglot-managed-mode-hook #'rayfall-lsp-on-demand-setup)
