@@ -317,17 +317,22 @@ remain unsupported: a callback parameter such as `ctx` may have no fields.
 The dot trigger opens the menu immediately, while other prefixes use the
 Company idle delay. `M-TAB` can always request completion explicitly. Other LSP clients can use the advertised `.` and quote triggers.
 
-On a builtin, which has no source, `M-.` shows its signature instead of failing
-with "No definitions found". The Emacs helper asks the engine for
-`(.repl.signature 'name)`, which evaluates and calls nothing, and shows the
-engine's own usage text. No REPL is needed: with none running it starts
-`rayforce` (`rayfall-program`) for the one lookup, and with an idle REPL it asks
-that session, so aliases such as `(set m min)` report the builtin they hold. A
-user binding that shadows a builtin still jumps to its source. This needs
-`rayforce` on `exec-path` and a build that has `.repl.signature`
-([#947](https://github.com/RayforceDB/rayforce/issues/947)). If `rayforce` is
-missing, `M-.` says so rather than reporting a bare "No definitions found".
-An undocumented builtin shows its name and calling convention only.
+## Builtins
+
+Hover on a name the document does not bind shows what the Rayforce engine says
+about it. For a builtin that is its calling convention and documented call
+forms, for example `println: builtin (vary)`. The server asks
+`(.repl.signature 'name)`, which evaluates and calls nothing and is given only a
+validated name, never project code. It runs `rayforce` once per distinct name
+(a few milliseconds) and caches the answer, including a negative one. Set
+`RAYFALL_ENGINE` to use another command; the default is `rayforce` on `PATH`.
+
+A name the document assigns keeps its own definition: the engine is asked only
+about names nothing in the document binds. A missing, slow or older engine falls
+back to the static description, silently. When the analysis cannot tell whether
+a call rebinds names, hover shows the builtin and keeps the runtime-dependent
+caveat. Go to definition on a builtin finds nothing, because a builtin has no
+source; in Emacs the definition key then shows this hover instead.
 
 Ensure `rayfall-lsp` is on Emacs's `exec-path`. Use `M-.` for definitions;
 hover information is available through Eglot/ElDoc. Other LSP clients can

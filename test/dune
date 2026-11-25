@@ -13,3 +13,8 @@
  (name test_project)
  (modules test_project)
  (libraries rayfall-lsp.core alcotest lsp unix))
+
+(test
+ (name test_engine)
+ (modules test_engine)
+ (libraries rayfall-lsp.core alcotest unix))

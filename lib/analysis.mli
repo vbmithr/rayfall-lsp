@@ -45,6 +45,11 @@ val syntax : t -> Syntax.t
 val bindings : t -> binding list
 val at : t -> int -> occurrence option
 val occurrences : t -> occurrence list
+
+val may_be_builtin : resolution -> bool
+(** A name nothing in the document binds, so a builtin of that name may be what
+    it means. A runtime rebinding stays possible when the analysis is opaque. *)
+
 val targets : resolution -> binding list
 val describe : resolution -> string
 val structure_at : t -> int -> (Source.span * structure) option

@@ -23,8 +23,8 @@ messages = [
     {"jsonrpc": "2.0", "id": 4, "method": "shutdown"},
     {"jsonrpc": "2.0", "method": "exit"},
 ]
-def run(messages):
-    process = subprocess.run([sys.argv[1], "--stdio"], input=b"".join(map(packet, messages)), capture_output=True, timeout=10)
+def run(messages, env=None):
+    process = subprocess.run([sys.argv[1], "--stdio"], input=b"".join(map(packet, messages)), capture_output=True, timeout=10, env=env)
     assert process.returncode == 0, process.stderr.decode()
     raw = process.stdout
     replies = {}
@@ -335,3 +335,42 @@ cfg.ca'''
     assert replies[4]['result'] == [], replies[4]
     assert [item['label'] for item in replies[6]['result']] == ['capital'], replies[6]
 print("PASS: field completion, imported namespaces, suffix edits, quoted keys, shadowing, unsaved changes")
+
+
+# Hover on a builtin asks the engine, which alone knows its builtins.
+builtin_source = "(println 1)\n(first [1 2])\n(.ipc.open 1)\n(set min 5)\n(min 3)\n(nosuchthing 1)"
+def builtin_hover(identifier, line, token, offset=0):
+    character = builtin_source.splitlines()[line].index(token) + offset
+    return {"jsonrpc": "2.0", "id": identifier, "method": "textDocument/hover", "params": {"textDocument": {"uri": "file:///builtins.rfl"}, "position": {"line": line, "character": character}}}
+builtin_messages = [
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+    {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": "file:///builtins.rfl", "languageId": "rayfall", "version": 1, "text": builtin_source}}},
+    builtin_hover(2, 0, "println"),
+    builtin_hover(3, 1, "first"),
+    builtin_hover(4, 2, ".ipc.open", 5),
+    builtin_hover(5, 4, "min"),
+    builtin_hover(6, 5, "nosuchthing"),
+    {"jsonrpc": "2.0", "id": 7, "method": "shutdown"}, {"jsonrpc": "2.0", "method": "exit"},
+]
+import os, shutil
+def hover_text(replies, identifier):
+    return replies[identifier]["result"]["contents"]["value"]
+if shutil.which("rayforce"):
+    replies = run(builtin_messages)
+    assert "println: builtin (vary)" in hover_text(replies, 2), replies[2]
+    assert hover_text(replies, 3).startswith("first: builtin ("), replies[3]
+    assert ".ipc.open: builtin (vary)" in hover_text(replies, 4), replies[4]
+    # A user binding that shadows a builtin is the user's, not the engine's.
+    assert "Candidate definitions" in hover_text(replies, 5), replies[5]
+    assert "builtin" not in hover_text(replies, 5), replies[5]
+    assert hover_text(replies, 6).startswith("Runtime-dependent"), replies[6]
+    assert "builtin" not in hover_text(replies, 6), replies[6]
+    print("PASS: hover shows engine signatures for builtins, user bindings win")
+else:
+    print("SKIP: no rayforce on PATH for builtin hover")
+# Without an engine, hover degrades to the static description.
+replies = run(builtin_messages, env={**os.environ, "RAYFALL_ENGINE": "rayfall-no-such-engine"})
+assert "println" in hover_text(replies, 2) and "builtin (" not in hover_text(replies, 2), replies[2]
+assert "builtin (" not in hover_text(replies, 3) and hover_text(replies, 3), replies[3]
+print("PASS: hover falls back to static text without an engine")

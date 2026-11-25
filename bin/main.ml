@@ -37,6 +37,7 @@ let obj xs = `Assoc xs
 let string s = `String s
 let docs : (string, Analysis.t) Hashtbl.t = Hashtbl.create 16
 let project_cache = Project.Cache.create ()
+let engine = Engine.create ()
 let roots = ref []
 let initialized = ref false
 let stopped = ref false
@@ -112,6 +113,21 @@ let document_at params =
   in
   let analysis = Project.analysis project in
   (project, analysis, Analysis.at analysis byte)
+
+(* A name the project does not bind is asked of the engine, which alone knows
+   its own builtins; a missing engine leaves the static description. *)
+let describe_occurrence project a (o : Analysis.occurrence) =
+  let resolution = Project.resolve project a o in
+  let static = Analysis.describe resolution in
+  if not (Analysis.may_be_builtin resolution) then static
+  else
+    match Engine.lookup engine o.name with
+    | None -> static
+    | Some signature -> (
+        let text = Engine.describe ~name:o.name signature in
+        match resolution with
+        | Analysis.Runtime_dependent _ -> text ^ "\n" ^ static
+        | _ -> text)
 
 let handle_request method_ params =
   if method_ = "initialize" then (
@@ -264,7 +280,7 @@ let handle_request method_ params =
             let details =
               (match o with
                 | None -> []
-                | Some o -> [ Analysis.describe (Project.resolve project a o) ])
+                | Some o -> [ describe_occurrence project a o ])
               @ (match structure with
                 | None -> []
                 | Some (_, shape) -> [ Analysis.describe_structure shape ])

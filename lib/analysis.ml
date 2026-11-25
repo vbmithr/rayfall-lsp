@@ -161,6 +161,21 @@ let builtin_names =
     "print";
   ]
 
+(* The reasons for a global that no assignment in the document explains. They
+   are the only runtime-dependent names a builtin of that name can stand
+   behind. They are defined once so [may_be_builtin] cannot drift from the
+   wording used where they are produced. *)
+let query_global_reason =
+  "global lookup may be shadowed by a query column; source schema is unknown"
+
+let global_reason = "global lookup depends on the call/execution context"
+
+let may_be_builtin = function
+  | Unresolved _ | Builtin _ -> true
+  | Runtime_dependent why ->
+      String.equal why query_global_reason || String.equal why global_reason
+  | Resolved _ | Candidates _ -> false
+
 let local env name = List.find_map (Names.find_opt name) env.locals
 
 (* A quoted target names a binding only under a literal alter or insert head or
@@ -1189,10 +1204,7 @@ let analyze ?(imports = []) source =
           | `Global name | `Query_global name ->
               let query = match r with `Query_global _ -> true | _ -> false in
               let reason =
-                if query then
-                  "global lookup may be shadowed by a query column; source \
-                   schema is unknown"
-                else "global lookup depends on the call/execution context"
+                if query then query_global_reason else global_reason
               in
               let bs =
                 List.filter (fun b -> b.kind = Global && b.name = name) bindings
