@@ -67,11 +67,17 @@ This covers global names and builtin namespaces, not dictionary fields."
   "Maximum seconds to wait for live namespace completion."
   :type 'number :group 'rayfall-lsp-ui)
 
+(defcustom rayfall-lsp-engine-timeout 3
+  "Seconds a throwaway engine may run to look up a builtin's signature."
+  :type 'number :group 'rayfall-lsp-ui)
+
 (defvar rayfall-completion-timeout)
 (defvar rayfall-repl-buffer)
 (defvar rayfall-repl--pending-eval)
 (defvar rayfall-repl--completion-request)
 (defvar rayfall-repl--completion-result)
+(defvar rayfall-program)
+(defvar rayfall-program-arguments)
 (defvar rayfall--repl-sentinel)
 (defvar rayfall--repl-sentinel-command)
 (declare-function rayfall--cancel-prompt-timer "rayfall-mode")
@@ -126,7 +132,7 @@ filter, outside the dynamic extent of the request."
 (defconst rayfall-lsp--name-regexp "\\`[A-Za-z0-9_.?!+*/<=>%~#$&:^|-]+\\'"
   "Names sent to the REPL.  Anything else is never interpolated into code.")
 
-(defun rayfall-lsp--signature (name)
+(defun rayfall-lsp--session-signature (name)
   "Return (KIND BUILTIN USAGE) for NAME from the idle live session, or nil.
 Ask `.repl.signature', which evaluates nothing and calls nothing."
   (when (and (string-match-p rayfall-lsp--name-regexp name)
@@ -163,14 +169,47 @@ Ask `.repl.signature', which evaluates nothing and calls nothing."
               (set-marker (car rayfall-repl--completion-request) nil)
               (setq rayfall-repl--completion-request nil))
             (setq rayfall-lsp--raw-reply nil))
-          (let ((lines (and (stringp rayfall-repl--completion-result)
-                            (split-string rayfall-repl--completion-result
-                                          "\r?\n"))))
-            ;; An undocumented builtin has an empty usage line.
-            (when (= (length lines) 3)
-              (list (string-remove-prefix "'" (string-trim (nth 0 lines)))
-                    (string-remove-prefix "'" (string-trim (nth 1 lines)))
-                    (string-trim (nth 2 lines))))))))))
+          (rayfall-lsp--parse-signature rayfall-repl--completion-result))))))
+
+(defun rayfall-lsp--oneshot-signature (name)
+  "Return (KIND BUILTIN USAGE) for NAME from a throwaway engine process, or nil.
+Used when no Rayfall session is running.  The engine reads the three
+`.repl.signature' queries from stdin and exits at end of input."
+  (when (and (string-match-p rayfall-lsp--name-regexp name)
+             (executable-find rayfall-program))
+    (let ((input (mapconcat
+                  (lambda (field)
+                    (format "(println (at (.repl.signature (quote %s)) (quote %s)))\n"
+                            name field))
+                  '("kind" "builtin" "usage") ""))
+          (limit (executable-find "timeout")))
+      (with-temp-buffer
+        (ignore-errors
+          (apply #'call-process-region input nil
+                 (or limit rayfall-program) nil t nil
+                 (append (and limit
+                              (list (format "%s" rayfall-lsp-engine-timeout)
+                                    rayfall-program))
+                         rayfall-program-arguments)))
+        (rayfall-lsp--parse-signature (buffer-string))))))
+
+(defun rayfall-lsp--signature (name)
+  "Return (KIND BUILTIN USAGE) for builtin NAME, or nil.
+Prefer an idle live session, which may hold rebinds; else ask a fresh engine."
+  (or (rayfall-lsp--session-signature name)
+      (rayfall-lsp--oneshot-signature name)))
+
+(defun rayfall-lsp--parse-signature (text)
+  "Parse the three reply lines in TEXT into (KIND BUILTIN USAGE), or nil.
+An undocumented builtin has an empty usage line."
+  (let ((lines (and (stringp text)
+                    (split-string (replace-regexp-in-string "\r?\n\\'" "" text)
+                                  "\r?\n"))))
+    (when (and (= (length lines) 3)
+               (string-match-p "\\`'[a-z]+\\'" (string-trim (nth 0 lines))))
+      (list (string-remove-prefix "'" (string-trim (nth 0 lines)))
+            (string-remove-prefix "'" (string-trim (nth 1 lines)))
+            (string-trim (nth 2 lines))))))
 
 (defun rayfall-lsp--describe-signature (name)
   "Return display text for builtin NAME, or nil when NAME is not a builtin."
@@ -204,9 +243,13 @@ of failing.  A user binding that shadows a builtin still jumps to its source."
      (let* ((name (rayfall-lsp--name-at-point))
             (text (and name (not (nth 8 (syntax-ppss)))
                        (rayfall-lsp--describe-signature name))))
-       (if text
-           (rayfall-lsp--display-inspection text nil)
-         (signal (car err) (cdr err)))))))
+       (cond
+        (text (rayfall-lsp--display-inspection text nil))
+        ;; Without an engine a builtin looks like any other missing name.
+        ((not (executable-find rayfall-program))
+         (user-error "%s (builtin signatures need `%s' on exec-path; see `rayfall-program')"
+                     (error-message-string err) rayfall-program))
+        (t (signal (car err) (cdr err))))))))
 
 (defun rayfall-lsp--show-single-candidate ()
   "Keep the Company menu visible even for one matching candidate."
