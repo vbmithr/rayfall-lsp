@@ -597,14 +597,14 @@ let tests =
         | Analysis.Candidates ([ b ], _) ->
             Alcotest.(check bool) "global" true (b.kind = Analysis.Global)
         | r -> failwith (Analysis.describe r));
-        (* inside a loop a target is as uncertain as a read *)
+        (* a loop does not change which local a target names *)
         let text =
           "(set f (fn [] (let t [1]) (times [i 2] (insert 't i)) t))"
         in
         (match
            (occurrence (analyze text) (find text "'t i" + 1)).resolution
          with
-        | Analysis.Runtime_dependent _ -> ()
+        | Analysis.Resolved { kind = Analysis.Local; _ } -> ()
         | r -> failwith (Analysis.describe r));
         (* amending a local leaves later global lookups certain *)
         let globals head =
@@ -626,6 +626,41 @@ let tests =
         match (occurrence a (String.length s - 3)).resolution with
         | Analysis.Runtime_dependent _ -> ()
         | _ -> failwith "query column cannot be assumed global" );
+    ( "names inside control forms still navigate",
+      fun () ->
+        let candidates a byte =
+          match (occurrence a byte).resolution with
+          | Analysis.Candidates (bs, _) -> List.length bs
+          | r -> failwith ("candidates-helper: " ^ Analysis.describe r)
+        in
+        (* A loop variable resolves to the assignments the document has. *)
+        let s = "(set vi 0)\n(while (< vi 3) (set vi (+ vi 1)))" in
+        let a = analyze s in
+        check_int "condition use" 2 (candidates a (find s "vi 3"));
+        check_int "body use" 2 (candidates a (find s "vi 1"));
+        (* A parameter of a callback stays a parameter. *)
+        let s = "(try (f) (fn [e] (g e)))" in
+        let a = analyze s in
+        (match (occurrence a (find s "e)))")).resolution with
+        | Analysis.Resolved { kind = Analysis.Parameter; _ } -> ()
+        | r -> failwith ("param: " ^ Analysis.describe r));
+        (* A local bound in a loop body reaches the forms after it. *)
+        let s = "(set f (fn [] (while 1 (let x 1) (g x))))" in
+        let a = analyze s in
+        (match (occurrence a (find s "x))")).resolution with
+        | Analysis.Resolved _ -> ()
+        | r -> failwith ("let-in-body: " ^ Analysis.describe r));
+        (* A name nothing binds is still unknown, not invented. *)
+        let s = "(while 1 (g nothing))" in
+        (match (occurrence (analyze s) (find s "nothing")).resolution with
+        | Analysis.Runtime_dependent _ -> ()
+        | r -> failwith ("unbound: " ^ Analysis.describe r));
+        (* A write that may not run does not make a later global definite. *)
+        let s = "(while 1 (set z 1))\nz" in
+        let a = analyze s in
+        match (occurrence a (String.length s - 1)).resolution with
+        | Analysis.Candidates _ -> ()
+        | r -> failwith ("later-global: " ^ Analysis.describe r) );
     ( "GC lifetime",
       fun () ->
         let a = analyze "(set x 1) x" in

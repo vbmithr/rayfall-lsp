@@ -147,7 +147,11 @@ the innermost local or parameter and otherwise to a global, so it appears in
 navigation and find references. Amending a local leaves global lookups certain.
 As in Rayforce, this holds for a literal head or a global alias bound before the
 function, such as `(set ins insert)`; through any other head a quoted symbol stays
-data. Inside `while`, `times` and `try` a target is runtime-dependent, as a read is.
+data. Inside `while`, `times`, `try`, `eval`, `resolve` and `load` a name is
+analyzed as ordinary code under an opaque environment: a local or parameter
+resolves as usual, a global resolves to the document's assignments of that name
+as candidates, and a name nothing binds stays runtime-dependent. A write in such
+a body never makes a later global certain.
 `upsert` is not modeled, because Rayforce's quoted form can still write a global.
 A shadowed function named `alter` or `insert` keeps ordinary function-call semantics.
 

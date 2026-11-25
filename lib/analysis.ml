@@ -708,11 +708,18 @@ let analyze ?(imports = []) source =
                      | _ -> None
                    in
                    loads := { path; span = (node i).span } :: !loads);
-                List.iter
-                  (fun j ->
-                    opaque j
-                      (name ^ " requires control-flow or runtime analysis"))
-                  args;
+                (* The arguments run an unknown number of times, or not at
+                   all. Walk them as ordinary code under an opaque environment:
+                   locals and parameters still resolve, a global resolves to
+                   the document's assignments of that name, and nothing they
+                   write establishes a later global. Locals thread through the
+                   arguments so a [let] in a body reaches the forms after it. *)
+                ignore
+                  (List.fold_left
+                     (fun e j ->
+                       let e, _ = walk (depth + 1) e j in
+                       { e with opaque = true })
+                     { env with opaque = true } args);
                 ({ env with opaque = true }, unknown))
               else if special && List.mem name [ "select"; "update"; "delete" ]
               then (
