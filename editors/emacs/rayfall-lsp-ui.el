@@ -244,7 +244,10 @@ of failing.  A user binding that shadows a builtin still jumps to its source."
             (text (and name (not (nth 8 (syntax-ppss)))
                        (rayfall-lsp--describe-signature name))))
        (cond
-        (text (rayfall-lsp--display-inspection text nil))
+        (text
+         ;; The echo area survives where a popup is hidden, unseen or absent.
+         (message "%s" text)
+         (rayfall-lsp--display-inspection text nil))
         ;; Without an engine a builtin looks like any other missing name.
         ((not (executable-find rayfall-program))
          (user-error "%s (builtin signatures need `%s' on exec-path; see `rayfall-program')"
