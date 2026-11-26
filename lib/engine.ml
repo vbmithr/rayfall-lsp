@@ -3,6 +3,9 @@ type signature = {
   builtin : string;
   special : bool;
   summary : string;
+  atomic : bool;
+  aggregate : bool;
+  elementwise : bool list;
   usage : string;
 }
 
@@ -21,7 +24,17 @@ let name_char = function
 let valid_name name =
   name <> "" && String.length name <= 128 && String.for_all name_char name
 
-let fields = [ "kind"; "builtin"; "special"; "summary"; "usage" ]
+let fields =
+  [
+    "kind";
+    "builtin";
+    "special";
+    "summary";
+    "atomic";
+    "aggregate";
+    "elementwise";
+    "usage";
+  ]
 
 (* One field per line: the summary is one line, usage comes last because it
    may be empty or contain anything. *)
@@ -49,17 +62,34 @@ let drop_final_newline output =
     String.sub output 0 (String.length output - 1)
   else output
 
+(* An engine that predates a field answers [0Nl] for it: that reads as absent. *)
+let flag s = String.trim s = "true"
+
+let flags s =
+  let s = String.trim s in
+  let n = String.length s in
+  if n >= 2 && s.[0] = '[' && s.[n - 1] = ']' then
+    String.sub s 1 (n - 2)
+    |> String.split_on_char ' '
+    |> List.filter (fun w -> w <> "")
+    |> List.map (fun w -> w = "true")
+  else []
+
 let parse output =
   match String.split_on_char '\n' (drop_final_newline output) with
-  | kind :: builtin :: special :: summary :: usage ->
+  | kind :: builtin :: special :: summary :: atomic :: aggregate :: elementwise
+    :: usage ->
       let kind = strip_quote kind and builtin = strip_quote builtin in
       if is_calling_convention kind && builtin <> "" then
         Some
           {
             kind;
             builtin;
-            special = String.trim special = "true";
+            special = flag special;
             summary = String.trim summary;
+            atomic = flag atomic;
+            aggregate = flag aggregate;
+            elementwise = flags elementwise;
             usage = String.trim (String.concat "\n" usage);
           }
       else None
@@ -135,6 +165,27 @@ let lookup t name =
         Hashtbl.replace t.cache name answer;
         answer
 
+(* How the builtin treats vector arguments, from the engine's own record. An
+   atomic builtin is element-wise in every argument, so it is said once. *)
+let mapping s =
+  if s.atomic then [ "atomic" ]
+  else
+    let indexed = List.mapi (fun i b -> (i + 1, b)) s.elementwise in
+    let on =
+      List.filter_map (fun (i, b) -> if b then Some i else None) indexed
+    in
+    (if s.aggregate then [ "aggregate" ] else [])
+    @
+    match (on, List.length s.elementwise) with
+    | [], _ -> []
+    | _, n when List.length on = n -> [ "element-wise" ]
+    | on, _ ->
+        [
+          Printf.sprintf "element-wise in argument%s %s"
+            (if List.length on > 1 then "s" else "")
+            (String.concat ", " (List.map string_of_int on));
+        ]
+
 let describe ~name s =
   let notes =
     (if s.builtin = name then [] else [ "alias of " ^ s.builtin ])
@@ -143,6 +194,9 @@ let describe ~name s =
   let note =
     if notes = [] then "" else name ^ ": " ^ String.concat ", " notes
   in
-  match List.filter (fun t -> t <> "") [ note; s.summary; s.usage ] with
+  let mapping = String.concat ", " (mapping s) in
+  match
+    List.filter (fun t -> t <> "") [ note; s.summary; mapping; s.usage ]
+  with
   | [] -> Printf.sprintf "%s: builtin (%s)" name s.kind
   | parts -> String.concat "\n" parts

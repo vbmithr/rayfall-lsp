@@ -2,14 +2,17 @@
 
 Hover on a name the document does not bind asks the Rayforce engine about it with `(.repl.signature 'name)`. That evaluates and calls nothing, and only a validated plain name is sent, never project code.
 
-The hover shows the engine's one-line `summary` and its documented call forms, preceded by a note when the name is an alias or a special form:
+The hover shows the engine's one-line `summary`, how the builtin treats vector arguments, and its documented call forms, preceded by a note when the name is an alias or a special form:
 
 ```
-Print value…
-(println <x: any>...) or (println <template: str, …> <value: any>...)
+Addition
+atomic
+(+ <left: num, date, time, timestamp or timespan> <right: the same kinds>)
 ```
 
-A builtin with nothing documented shows only its calling convention, for example `name: builtin (vary)`. The server adds no help text of its own: the text is the engine's. Relevant engine issues: undocumented builtins ([#1736](https://github.com/RayforceDB/rayforce/issues/1736)), the `summary` field ([#1737](https://github.com/RayforceDB/rayforce/issues/1737)), and an atomicity field ([#1744](https://github.com/RayforceDB/rayforce/issues/1744)).
+The vector line comes from the engine's `atomic`, `aggregate` and `elementwise` fields: `atomic` (maps over vectors and lists in every argument), `aggregate` (reduces a vector), `element-wise` (every argument maps a vector element by element), or `element-wise in argument 2`. It is omitted when the engine describes none of these. `elementwise` describes one form of a builtin with several, such as `min`, so read it with the usage line.
+
+A builtin with nothing documented shows only its calling convention, for example `name: builtin (vary)`. The server adds no help text of its own: the text is the engine's. Relevant engine issues: undocumented builtins ([#1736](https://github.com/RayforceDB/rayforce/issues/1736)), the `summary` field ([#1737](https://github.com/RayforceDB/rayforce/issues/1737)), and the atomicity fields ([#1744](https://github.com/RayforceDB/rayforce/issues/1744), [#1751](https://github.com/RayforceDB/rayforce/issues/1751)).
 
 ## Behaviour
 

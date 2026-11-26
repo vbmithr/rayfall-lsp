@@ -13,6 +13,13 @@ type signature = {
   special : bool;  (** A special form: its arguments are not evaluated. *)
   summary : string;
       (** What the builtin does, in one line, or [""] when undocumented. *)
+  atomic : bool;
+      (** Registered atomic: mapped over vectors and lists in every argument. *)
+  aggregate : bool;  (** Registered as an aggregation that reduces a vector. *)
+  elementwise : bool list;
+      (** One flag per argument: whether it maps a vector element by element.
+          [[]] when the engine does not describe the builtin, or predates the
+          field. It describes one form of a builtin with several. *)
   usage : string;  (** Documented call forms, or [""] when undocumented. *)
 }
 

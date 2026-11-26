@@ -7,6 +7,9 @@ let reply =
    'min\n\
    false\n\
    Smallest element of a vector, or the lesser of two values\n\
+   false\n\
+   false\n\
+   [false]\n\
    (min <x: vector, atom or list>) or (min <a: num> <b: num>)\n"
 
 let signature =
@@ -26,6 +29,9 @@ let parses () =
          builtin = "min";
          special = false;
          summary = "Smallest element of a vector, or the lesser of two values";
+         atomic = false;
+         aggregate = false;
+         elementwise = [ false ];
          usage = "(min <x: vector, atom or list>) or (min <a: num> <b: num>)";
        })
     (Engine.parse reply);
@@ -36,9 +42,12 @@ let parses () =
          builtin = ".ipc.open";
          special = false;
          summary = "";
+         atomic = false;
+         aggregate = false;
+         elementwise = [];
          usage = "";
        })
-    (Engine.parse "'vary\n'.ipc.open\nfalse\n\n\n");
+    (Engine.parse "'vary\n'.ipc.open\nfalse\n\n0Nl\n0Nl\n0Nl\n\n");
   Alcotest.check option_signature "special form and CRLF"
     (Some
        {
@@ -46,9 +55,20 @@ let parses () =
          builtin = "if";
          special = true;
          summary = "Conditional";
+         atomic = false;
+         aggregate = false;
+         elementwise = [ true; true ];
          usage = "(if ...)";
        })
-    (Engine.parse "'vary\r\n'if\r\ntrue\r\nConditional\r\n(if ...)\r\n");
+    (Engine.parse
+       "'vary\r\n\
+        'if\r\n\
+        true\r\n\
+        Conditional\r\n\
+        false\r\n\
+        false\r\n\
+        [true true]\r\n\
+        (if ...)\r\n");
   List.iter
     (fun noise ->
       Alcotest.check option_signature noise None (Engine.parse noise))
@@ -56,7 +76,7 @@ let parses () =
       "";
       "'missing\n";
       "'missing\n''\nfalse\n\n";
-      "error: boom\n\n\n\n\n";
+      "error: boom\n\n\n\n\n\n\n\n";
       "'value\n''\nfalse\n\n";
     ]
 
@@ -81,6 +101,9 @@ let describes () =
          builtin = ".ipc.open";
          special = false;
          summary = "";
+         atomic = false;
+         aggregate = false;
+         elementwise = [];
          usage = "";
        });
   Alcotest.(check string)
@@ -91,8 +114,44 @@ let describes () =
          builtin = "if";
          special = true;
          summary = "";
+         atomic = false;
+         aggregate = false;
+         elementwise = [];
          usage = "";
        })
+
+let mapping_text () =
+  let describe s = Engine.describe ~name:"f" s in
+  let base =
+    {
+      Engine.kind = "binary";
+      builtin = "f";
+      special = false;
+      summary = "";
+      atomic = false;
+      aggregate = false;
+      elementwise = [];
+      usage = "(f x)";
+    }
+  in
+  Alcotest.(check string)
+    "atomic is said once" "atomic\n(f x)"
+    (describe { base with atomic = true; elementwise = [ true; true ] });
+  Alcotest.(check string)
+    "aggregate" "aggregate\n(f x)"
+    (describe { base with aggregate = true; elementwise = [ false ] });
+  Alcotest.(check string)
+    "every argument" "element-wise\n(f x)"
+    (describe { base with elementwise = [ true; true ] });
+  Alcotest.(check string)
+    "one argument" "element-wise in argument 1\n(f x)"
+    (describe { base with elementwise = [ true; false ] });
+  Alcotest.(check string)
+    "several arguments" "element-wise in arguments 1, 3\n(f x)"
+    (describe { base with elementwise = [ true; false; true ] });
+  Alcotest.(check string)
+    "nothing known" "(f x)"
+    (describe { base with elementwise = [ false ] })
 
 let validates_names () =
   List.iter
@@ -166,8 +225,17 @@ let real_engine () =
     | Some s ->
         Alcotest.(check string) "min" "min" s.builtin;
         check "usage documented" true (s.usage <> "");
-        check "summary documented" true (s.summary <> "")
+        check "summary documented" true (s.summary <> "");
+        ()
     | None -> Alcotest.fail "min is a builtin");
+    (match Engine.lookup engine "+" with
+    | Some s ->
+        check "+ is atomic" true s.atomic;
+        Alcotest.(check (list bool)) "+ maps both" [ true; true ] s.elementwise
+    | None -> Alcotest.fail "+ is a builtin");
+    (match Engine.lookup engine "sum" with
+    | Some s -> check "sum aggregates" true s.aggregate
+    | None -> Alcotest.fail "sum is a builtin");
     (match Engine.lookup engine ".ipc.open" with
     | Some s -> Alcotest.(check string) "dotted" ".ipc.open" s.builtin
     | None -> Alcotest.fail ".ipc.open is a builtin");
@@ -183,6 +251,7 @@ let () =
           [
             ("parse", parses);
             ("describe", describes);
+            ("vector mapping", mapping_text);
             ("names are validated", validates_names);
             ("odd names never reach the engine", never_sends_odd_names);
             ("answers are cached", caches_answers);
